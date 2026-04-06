@@ -7,7 +7,7 @@ import {
 } from "@heroicons/vue/24/outline";
 
 const bgImage =
-  "https://images.unsplash.com/photo-1524996297912-2818568f29ca?auto=format&fit=crop&w=2400&q=85";
+  "https://images.unsplash.com/photo-1741125656759-a27dfd94ff3e?auto=format&fit=crop&w=2400&q=85";
 
 const features = [
   {

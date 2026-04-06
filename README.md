@@ -434,6 +434,10 @@ Copy `frontend/dist` to a web directory, e.g. `/var/www/duenote/`.
 7) **Nginx**
 - Serve `/var/www/duenote` at `/`
 - Proxy `/api/` to the backend (e.g. `http://127.0.0.1:3000`)
+- **SPA fallback is required** so routes like `/app` return `index.html` (Vue Router history mode)
+
+An example config is included in this repo:
+- `deploy/nginx/duenote.conf`
 
 8) **HTTPS**
 - Use Let’s Encrypt (certbot) or your preferred method.
@@ -443,6 +447,15 @@ Copy `frontend/dist` to a web directory, e.g. `/var/www/duenote/`.
 - `GET /health` returns `{ ok: true, env: "production" }`
 - Login works (Google and/or email OTP)
 - Translation works (DeepL key set)
+
+### Why `/app` must be handled by nginx
+Google OAuth redirects to `${FRONTEND_URL}/app` after sign-in. `/app` is a **client-side route** (Vue Router) and not a physical file. Your web server must serve `index.html` for `/app` via an SPA fallback like:
+
+```
+try_files $uri $uri/ /index.html;
+```
+
+Without that line, `/app` will 404 in production.
 
 ---
 
