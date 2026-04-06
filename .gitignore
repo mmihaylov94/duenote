@@ -11,6 +11,10 @@ build/
 .env*
 !.env.example
 
+# Local uploads (avatars)
+data/uploads/
+backend/data/uploads/
+
 # Vite / tooling local files
 *.local
 

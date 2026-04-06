@@ -1,14 +1,109 @@
 import { Router } from "express";
 import * as courseRepo from "../db/courses.repository.js";
+import * as coursePinsRepo from "../db/coursePins.repository.js";
+import * as vocabEntriesRepo from "../db/vocabularyEntries.repository.js";
 import { normalizeLangOrDefault, normalizeLangRequired } from "../utils/languages.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 export const coursesRouter = Router();
+coursesRouter.use(requireAuth);
+
+function userId(req) {
+  return Number(req.session.userId);
+}
 
 coursesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    res.json(await courseRepo.listCoursesWithWorkbooks());
+    res.json(await courseRepo.listCoursesWithWorkbooks(userId(req)));
+  }),
+);
+
+coursesRouter.get(
+  "/:id/vocabulary-entries",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const idsRaw = req.query.ids;
+    if (typeof idsRaw === "string" && idsRaw.trim()) {
+      const ids = idsRaw
+        .split(",")
+        .map((x) => Number(x.trim()))
+        .filter((x) => Number.isFinite(x));
+      const data = await vocabEntriesRepo.getEntriesByIds(id, userId(req), ids);
+      if (!data) return res.status(404).json({ error: "Not found" });
+      return res.json(data);
+    }
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const limit = req.query.limit != null ? Number(req.query.limit) : 20;
+    const data = await vocabEntriesRepo.searchEntries(id, userId(req), q, limit);
+    if (!data) return res.status(404).json({ error: "Not found" });
+    res.json(data);
+  }),
+);
+
+coursesRouter.post(
+  "/:id/vocabulary-entries",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const body = req.body || {};
+    const result = await vocabEntriesRepo.createEntry(id, userId(req), {
+      word: body.word,
+      meaning: body.meaning,
+    });
+    if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
+    if (result.error === "empty_word" || result.error === "invalid_input") {
+      return res.status(400).json({ error: "Invalid word" });
+    }
+    res.status(result.created ? 201 : 200).json(result.entry);
+  }),
+);
+
+coursesRouter.patch(
+  "/:id/vocabulary-entries/:entryId",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const entryId = Number(req.params.entryId);
+    if (!Number.isFinite(id) || !Number.isFinite(entryId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const body = req.body || {};
+    const result = await vocabEntriesRepo.updateEntry(id, userId(req), entryId, {
+      word: body.word,
+      meaning: body.meaning,
+    });
+    if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
+    if (result.error === "invalid_input") return res.status(400).json({ error: "Invalid id" });
+    if (result.error === "nothing_to_update") return res.status(400).json({ error: "Nothing to update" });
+    if (result.error === "empty_word") return res.status(400).json({ error: "Word cannot be empty" });
+    if (result.error === "duplicate_word") {
+      return res.status(409).json({ error: "Another entry already uses this word" });
+    }
+    res.json(result.entry);
+  }),
+);
+
+coursesRouter.delete(
+  "/:id/vocabulary-entries/:entryId",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const entryId = Number(req.params.entryId);
+    if (!Number.isFinite(id) || !Number.isFinite(entryId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const result = await vocabEntriesRepo.deleteEntry(id, userId(req), entryId);
+    if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
+    if (result.error === "still_referenced") {
+      return res.status(409).json({ error: "Entry is still used in a workbook" });
+    }
+    if (result.error === "invalid_input") return res.status(400).json({ error: "Invalid id" });
+    res.status(204).end();
   }),
 );
 
@@ -19,9 +114,111 @@ coursesRouter.get(
     if (!Number.isFinite(id)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const data = await courseRepo.getCourseVocabulary(id);
+    const data = await courseRepo.getCourseVocabulary(id, userId(req));
     if (!data) return res.status(404).json({ error: "Not found" });
     res.json(data);
+  }),
+);
+
+coursesRouter.get(
+  "/:id/search",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const data = await courseRepo.searchCourseSections(id, userId(req), q);
+    if (!data) return res.status(404).json({ error: "Not found" });
+    res.json(data);
+  }),
+);
+
+coursesRouter.get(
+  "/:id/pins",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const data = await coursePinsRepo.listPins(id, userId(req));
+    if (!data) return res.status(404).json({ error: "Not found" });
+    res.json(data);
+  }),
+);
+
+coursesRouter.post(
+  "/:id/pins",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const body = req.body || {};
+    const result = await coursePinsRepo.createPin(id, userId(req), {
+      workbookId: body.workbookId,
+      sectionId: body.sectionId,
+      label: body.label,
+    });
+    if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
+    if (result.error === "invalid_workbook") return res.status(400).json({ error: "Workbook not in this course" });
+    if (result.error === "invalid_section" || result.error === "invalid_input") {
+      return res.status(400).json({ error: "Invalid section" });
+    }
+    if (result.error === "empty_label") return res.status(400).json({ error: "Label is required" });
+    if (result.error === "duplicate") return res.status(409).json({ error: "Section already pinned" });
+    res.status(201).json(result.pin);
+  }),
+);
+
+coursesRouter.put(
+  "/:id/pins/reorder",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const orderedIds = (req.body || {}).orderedIds;
+    const result = await coursePinsRepo.reorderPins(id, userId(req), orderedIds);
+    if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
+    if (result.error === "invalid_order" || result.error === "invalid_input") {
+      return res.status(400).json({ error: "Invalid order" });
+    }
+    res.json(result);
+  }),
+);
+
+coursesRouter.patch(
+  "/:id/pins/:pinId",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const pinId = Number(req.params.pinId);
+    if (!Number.isFinite(id) || !Number.isFinite(pinId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const body = req.body || {};
+    const result = await coursePinsRepo.updatePinLabel(id, userId(req), pinId, { label: body.label });
+    if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
+    if (result.error === "empty_label" || result.error === "invalid_label") {
+      return res.status(400).json({ error: "Invalid label" });
+    }
+    if (result.error === "invalid_input") return res.status(400).json({ error: "Invalid id" });
+    res.json(result.pin);
+  }),
+);
+
+coursesRouter.delete(
+  "/:id/pins/:pinId",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const pinId = Number(req.params.pinId);
+    if (!Number.isFinite(id) || !Number.isFinite(pinId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    if (!(await coursePinsRepo.deletePin(id, userId(req), pinId))) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.status(204).end();
   }),
 );
 
@@ -35,7 +232,7 @@ coursesRouter.post(
     if (sl === null || tl === null) {
       return res.status(400).json({ error: "Invalid sourceLang or targetLang" });
     }
-    const c = await courseRepo.createCourse({ title, sourceLang: sl, targetLang: tl });
+    const c = await courseRepo.createCourse(userId(req), { title, sourceLang: sl, targetLang: tl });
     res.status(201).json(c);
   }),
 );
@@ -64,7 +261,7 @@ coursesRouter.patch(
       }
       fields.targetLang = tl;
     }
-    const c = await courseRepo.updateCourse(id, fields);
+    const c = await courseRepo.updateCourse(id, userId(req), fields);
     if (!c) return res.status(404).json({ error: "Not found" });
     res.json(c);
   }),
@@ -77,7 +274,7 @@ coursesRouter.delete(
     if (!Number.isFinite(id)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    if (!(await courseRepo.deleteCourse(id))) return res.status(404).json({ error: "Not found" });
+    if (!(await courseRepo.deleteCourse(id, userId(req)))) return res.status(404).json({ error: "Not found" });
     res.status(204).end();
   }),
 );

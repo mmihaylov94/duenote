@@ -1,8 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/vue/20/solid";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+import { apiFetch } from "../api/client.js";
 
 const props = defineProps({
   course: { type: Object, required: true },
@@ -21,7 +20,7 @@ async function load() {
   loading.value = true;
   loadError.value = "";
   try {
-    const r = await fetch(`${API_BASE}/api/courses/${props.course.id}/vocabulary`);
+    const r = await apiFetch(`/api/courses/${props.course.id}/vocabulary`);
     if (!r.ok) {
       loadError.value = `Could not load vocabulary (HTTP ${r.status}).`;
       entries.value = [];
@@ -68,7 +67,8 @@ const filteredEntries = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (q) {
     list = list.filter(
-      (e) => e.word.toLowerCase().includes(q) || e.meaning.toLowerCase().includes(q),
+      (e) =>
+        e.word.toLowerCase().includes(q) || e.meaning.toLowerCase().includes(q),
     );
   }
   return list;
@@ -110,7 +110,8 @@ onUnmounted(() => {
             Vocabulary
           </h2>
           <p class="mt-0.5 truncate text-sm text-zinc-500 dark:text-zinc-400">
-            {{ course.title || "Course" }} — words from all vocabulary sections, in order added
+            {{ course.title || "Course" }} - words from all vocabulary sections,
+            in order added
           </p>
         </div>
         <button
@@ -140,14 +141,20 @@ onUnmounted(() => {
           />
         </div>
         <div class="flex min-w-0 items-center gap-2 sm:w-56">
-          <label for="vocab-workbook-filter" class="sr-only">Filter by workbook</label>
+          <label for="vocab-workbook-filter" class="sr-only"
+            >Filter by workbook</label
+          >
           <select
             id="vocab-workbook-filter"
             v-model="workbookFilter"
             class="w-full min-w-0 rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           >
             <option value="">All workbooks</option>
-            <option v-for="w in workbookOptions" :key="w.id" :value="String(w.id)">
+            <option
+              v-for="w in workbookOptions"
+              :key="w.id"
+              :value="String(w.id)"
+            >
               {{ w.title }}
             </option>
           </select>
@@ -155,13 +162,18 @@ onUnmounted(() => {
       </div>
 
       <div class="min-h-0 flex-1 overflow-auto px-5 py-3">
-        <p v-if="loading" class="text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
-        <p v-else-if="loadError" class="text-sm text-red-600 dark:text-red-400">{{ loadError }}</p>
+        <p v-if="loading" class="text-sm text-zinc-500 dark:text-zinc-400">
+          Loading…
+        </p>
+        <p v-else-if="loadError" class="text-sm text-red-600 dark:text-red-400">
+          {{ loadError }}
+        </p>
         <p
           v-else-if="entries.length === 0"
           class="text-sm text-zinc-500 dark:text-zinc-400"
         >
-          No vocabulary yet. Add vocabulary sections to workbooks in this course.
+          No vocabulary yet. Add vocabulary sections to workbooks in this
+          course.
         </p>
         <div v-else class="overflow-x-auto">
           <table class="w-full min-w-[480px] border-collapse text-sm">
@@ -181,25 +193,44 @@ onUnmounted(() => {
                 :key="row.order"
                 class="border-b border-zinc-100 dark:border-zinc-800"
               >
-                <td class="py-2 pr-3 align-top text-zinc-400 tabular-nums dark:text-zinc-500">
+                <td
+                  class="py-2 pr-3 align-top text-zinc-400 tabular-nums dark:text-zinc-500"
+                >
                   {{ row.order + 1 }}
                 </td>
-                <td class="max-w-[200px] py-2 pr-3 align-top text-zinc-900 dark:text-zinc-100">
-                  <span class="whitespace-pre-wrap break-words">{{ row.word || "—" }}</span>
-                </td>
-                <td class="max-w-[240px] py-2 pr-3 align-top text-zinc-800 dark:text-zinc-200">
-                  <span class="whitespace-pre-wrap break-words">{{ row.meaning || "—" }}</span>
-                </td>
-                <td class="max-w-[160px] py-2 align-top text-zinc-500 dark:text-zinc-400">
-                  <span class="line-clamp-2 break-words" :title="row.workbookTitle">{{
-                    row.workbookTitle
+                <td
+                  class="max-w-[200px] py-2 pr-3 align-top text-zinc-900 dark:text-zinc-100"
+                >
+                  <span class="whitespace-pre-wrap break-words">{{
+                    row.word || "-"
                   }}</span>
+                </td>
+                <td
+                  class="max-w-[240px] py-2 pr-3 align-top text-zinc-800 dark:text-zinc-200"
+                >
+                  <span class="whitespace-pre-wrap break-words">{{
+                    row.meaning || "-"
+                  }}</span>
+                </td>
+                <td
+                  class="max-w-[160px] py-2 align-top text-zinc-500 dark:text-zinc-400"
+                >
+                  <span
+                    class="line-clamp-2 break-words"
+                    :title="row.workbookTitle"
+                    >{{ row.workbookTitle }}</span
+                  >
                 </td>
               </tr>
             </tbody>
           </table>
           <p
-            v-if="!loading && !loadError && filteredEntries.length === 0 && entries.length > 0"
+            v-if="
+              !loading &&
+              !loadError &&
+              filteredEntries.length === 0 &&
+              entries.length > 0
+            "
             class="mt-3 text-sm text-zinc-500 dark:text-zinc-400"
           >
             No entries match your search or filter.

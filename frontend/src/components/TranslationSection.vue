@@ -1,7 +1,6 @@
 <script setup>
 import { ref, watch, onUnmounted, onMounted, nextTick } from "vue";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+import { apiFetch } from "../api/client.js";
 
 const section = defineModel({ type: Object, required: true });
 
@@ -146,9 +145,8 @@ function autoGrow(el) {
 }
 
 async function translate(text, sourceLang, targetLang) {
-  const res = await fetch(`${API_BASE}/api/translate`, {
+  const res = await apiFetch("/api/translate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, sourceLang, targetLang }),
   });
   const data = await res.json().catch(() => ({}));
@@ -296,7 +294,10 @@ function onRightInput(e) {
 </script>
 
 <template>
-  <div class="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+  <div
+    data-dictionary-host
+    class="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+  >
     <div class="p-3">
       <p
         v-if="error"

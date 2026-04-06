@@ -25,6 +25,7 @@ const toolbarOptions = [
 
 <template>
   <div
+    data-dictionary-host
     class="grammar-quill rounded-xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
   >
     <QuillEditor
@@ -83,7 +84,7 @@ const toolbarOptions = [
   fill: rgb(63 63 70);
 }
 
-/* Dark — Tailwind `dark:` defaults to prefers-color-scheme; also support .dark on an ancestor */
+/* Dark - Tailwind `dark:` defaults to prefers-color-scheme; also support .dark on an ancestor */
 @media (prefers-color-scheme: dark) {
   .grammar-quill :deep(.ql-toolbar.ql-snow) {
     border-color: rgb(63 63 70);

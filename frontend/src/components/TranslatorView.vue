@@ -1,18 +1,38 @@
 <script setup>
 import { ref, watch, onUnmounted, nextTick } from "vue";
-import { TrashIcon } from "@heroicons/vue/20/solid";
+import {
+  BookmarkIcon as BookmarkSolid,
+  TrashIcon,
+} from "@heroicons/vue/20/solid";
+import {
+  BookmarkIcon as BookmarkOutline,
+  Bars3Icon,
+} from "@heroicons/vue/24/outline";
 import TranslationSection from "./TranslationSection.vue";
 import HeaderSection from "./HeaderSection.vue";
 import VocabularySection from "./VocabularySection.vue";
 import SimpleTextSection from "./SimpleTextSection.vue";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+import SelectionDictionaryFloater from "./SelectionDictionaryFloater.vue";
+import VideoSection from "./VideoSection.vue";
+import { apiFetch } from "../api/client.js";
 
 const props = defineProps({
   workbookId: { type: Number, required: true },
+  courseId: { type: Number, default: null },
+  pinnedSectionIds: { type: Array, default: () => [] },
+  pendingSectionScrollId: { type: String, default: null },
+  /** When true, show the quick-access column (same scroll context as sections). */
+  quickAccessEnabled: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["loaded", "saved", "meta"]);
+const emit = defineEmits([
+  "loaded",
+  "saved",
+  "meta",
+  "pending-scroll-done",
+  "pin-click",
+  "vocabulary-changed",
+]);
 
 const sourceLang = defineModel("sourceLang", { type: String, default: "EN" });
 const targetLang = defineModel("targetLang", { type: String, default: "DE" });
@@ -25,6 +45,43 @@ let saveAbort = null;
 let saveTimer = null;
 
 const SAVE_DEBOUNCE_MS = 1000;
+
+const videoUrlModalOpen = ref(false);
+const videoUrlDraft = ref("");
+const videoUrlError = ref("");
+
+function normalizeUrl(s) {
+  let v = String(s ?? "").trim();
+  if (!v) return "";
+  if (/^www\./i.test(v)) v = `https://${v}`;
+  if (!/^https?:\/\//i.test(v)) return v;
+  try {
+    return new URL(v).toString();
+  } catch {
+    return v;
+  }
+}
+
+function isValidYouTubeUrl(raw) {
+  const u = normalizeUrl(raw);
+  if (!u || !/^https?:\/\//i.test(u)) return false;
+  let url;
+  try {
+    url = new URL(u);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+  if (host === "youtu.be") return Boolean(url.pathname.replace(/^\//, ""));
+  if (host === "youtube.com" || host === "m.youtube.com") {
+    if (url.pathname === "/watch") return Boolean(url.searchParams.get("v"));
+    if (url.pathname.startsWith("/embed/"))
+      return Boolean(url.pathname.split("/")[2]);
+    if (url.pathname.startsWith("/shorts/"))
+      return Boolean(url.pathname.split("/")[2]);
+  }
+  return false;
+}
 
 function workbookTitleFromSections(list) {
   const line = (list[0]?.text ?? "").trim().split(/\n/)[0];
@@ -47,7 +104,14 @@ function newSection(kind) {
     return {
       id,
       type: "vocabulary",
-      rows: [{ id: crypto.randomUUID(), word: "", meaning: "" }],
+      entryIds: [],
+    };
+  }
+  if (kind === "video") {
+    return {
+      id,
+      type: "video",
+      url: "",
     };
   }
   return { id, type: kind, text: "" };
@@ -67,15 +131,20 @@ function ensureSectionShape(list) {
       };
     }
     if (s.type === "vocabulary") {
-      const rows = Array.isArray(s.rows) && s.rows.length > 0 ? s.rows : [{}];
+      const ids = Array.isArray(s.entryIds)
+        ? s.entryIds.map((x) => Number(x)).filter((x) => Number.isFinite(x))
+        : [];
       return {
         id,
         type: "vocabulary",
-        rows: rows.map((r) => ({
-          id: r.id || crypto.randomUUID(),
-          word: r.word ?? "",
-          meaning: r.meaning ?? "",
-        })),
+        entryIds: ids,
+      };
+    }
+    if (s.type === "video") {
+      return {
+        id,
+        type: "video",
+        url: typeof s.url === "string" ? s.url : "",
       };
     }
     return {
@@ -112,14 +181,16 @@ async function loadWorkbook() {
   isHydrating.value = true;
   loadError.value = "";
   try {
-    const res = await fetch(`${API_BASE}/api/workbooks/${id}`, { signal });
+    const res = await apiFetch(`/api/workbooks/${id}`, { signal });
     if (!res.ok) throw new Error("Failed to load workbook");
     const w = await res.json();
     if (id !== props.workbookId) return;
     sourceLang.value = w.sourceLang ?? "EN";
     targetLang.value = w.targetLang ?? "DE";
     const raw = Array.isArray(w.sections) ? w.sections : [];
-    sections.value = ensureSectionShape(raw.length ? raw : [newSection("header")]);
+    sections.value = ensureSectionShape(
+      raw.length ? raw : [newSection("header")],
+    );
     syncLangsIntoTranslationSections();
     emit("loaded", { title: w.title ?? "Untitled" });
     emit("meta", { title: workbookTitleFromSections(sections.value) });
@@ -131,6 +202,44 @@ async function loadWorkbook() {
     isHydrating.value = false;
   }
 }
+
+function isSectionPinned(sectionId) {
+  const s = String(sectionId ?? "");
+  return props.pinnedSectionIds.some((id) => String(id) === s);
+}
+
+function onPinButtonClick(sectionId) {
+  emit("pin-click", {
+    sectionId: String(sectionId),
+    isPinned: isSectionPinned(sectionId),
+  });
+}
+
+async function tryPendingScroll() {
+  const id = props.pendingSectionScrollId;
+  if (!id) return;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await nextTick();
+    const el = document.querySelector(`[data-section-id="${CSS.escape(id)}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
+      emit("pending-scroll-done", { found: true });
+      return;
+    }
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+  emit("pending-scroll-done", { found: false });
+}
+
+watch(
+  () => [
+    props.pendingSectionScrollId,
+    sections.value.map((s) => s.id).join(","),
+  ],
+  () => {
+    tryPendingScroll();
+  },
+);
 
 watch(
   () => props.workbookId,
@@ -162,10 +271,9 @@ async function persistWorkbook() {
   saveAbort = new AbortController();
   const signal = saveAbort.signal;
   try {
-    const res = await fetch(`${API_BASE}/api/workbooks/${id}`, {
+    const res = await apiFetch(`/api/workbooks/${id}`, {
       method: "PATCH",
       signal,
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sections: sections.value,
         sourceLang: sourceLang.value,
@@ -178,6 +286,16 @@ async function persistWorkbook() {
   } catch (e) {
     if (e.name === "AbortError") return;
   }
+}
+
+/** Save immediately (e.g. before deleting a vocabulary entry that must be unreferenced in DB) */
+async function flushPersist() {
+  if (isHydrating.value) return;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  await persistWorkbook();
 }
 
 watch(
@@ -193,6 +311,31 @@ watch(
 
 function addSection(kind) {
   sections.value.push(newSection(kind));
+}
+
+function openVideoUrlModal() {
+  videoUrlError.value = "";
+  videoUrlDraft.value = "";
+  videoUrlModalOpen.value = true;
+}
+
+function closeVideoUrlModal() {
+  videoUrlModalOpen.value = false;
+  videoUrlError.value = "";
+  videoUrlDraft.value = "";
+}
+
+function confirmVideoUrl() {
+  const cleaned = normalizeUrl(videoUrlDraft.value);
+  if (!isValidYouTubeUrl(cleaned)) {
+    videoUrlError.value =
+      "Paste a valid YouTube URL (watch, shorts, youtu.be, or embed).";
+    return;
+  }
+  const sec = newSection("video");
+  sec.url = cleaned;
+  sections.value = [...sections.value, sec];
+  closeVideoUrlModal();
 }
 
 function isPinnedFirst(idx) {
@@ -244,120 +387,282 @@ function onDrop(toIdx) {
   list.splice(insert, 0, moved);
   sections.value = list;
 }
+
+async function addSelectionToVocabulary(word, meaning) {
+  const cid = props.courseId;
+  if (!cid || !word) return;
+  const r = await apiFetch(`/api/courses/${cid}/vocabulary-entries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ word, meaning }),
+  });
+  if (!r.ok) return;
+  const data = await r.json();
+  const id = Number(data.id);
+  if (!Number.isFinite(id)) return;
+
+  let vIdx = sections.value.findIndex((s) => s.type === "vocabulary");
+  if (vIdx === -1) {
+    sections.value.push(newSection("vocabulary"));
+    vIdx = sections.value.length - 1;
+  }
+  const sec = sections.value[vIdx];
+  if (!Array.isArray(sec.entryIds)) sec.entryIds = [];
+  if (sec.entryIds.includes(id)) return;
+  sec.entryIds.push(id);
+  emit("vocabulary-changed");
+}
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-    <div class="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-4 p-4">
-      <p
-        v-if="loadError"
-        class="shrink-0 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+  <div
+    class="w-full min-w-0 bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+  >
+    <div
+      v-if="videoUrlModalOpen"
+      class="fixed inset-0 z-[103] flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add video"
+      @click.self="closeVideoUrlModal"
+    >
+      <div
+        class="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        @click.stop
       >
-        {{ loadError }}
-      </p>
-
-      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-        <div
-          v-for="(sec, idx) in sections"
-          :key="sec.id"
-          class="flex items-start gap-2 rounded-lg transition-colors"
-          :class="
-            dragOverIdx === idx && dragFrom !== null && dragFrom !== idx
-              ? 'bg-indigo-50/90 ring-1 ring-indigo-200 dark:bg-indigo-950/40 dark:ring-indigo-800'
-              : ''
-          "
-          @dragover.prevent="onDragOver(idx)"
-          @drop.prevent="onDrop(idx)"
+        <h2
+          class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
         >
-          <div class="flex shrink-0 flex-col items-center gap-1.5 pt-2">
-            <span
-              role="button"
-              tabindex="0"
-              :aria-label="
-                isPinnedFirst(idx) ? 'Primary header — order is fixed' : 'Drag to reorder section'
-              "
-              :draggable="!isPinnedFirst(idx)"
-              class="flex size-8 shrink-0 touch-none select-none items-center justify-center rounded-md text-zinc-400 dark:text-zinc-500"
+          Add video
+        </h2>
+        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Paste a YouTube link.
+        </p>
+
+        <div class="mt-4">
+          <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >Video URL</label
+          >
+          <input
+            v-model="videoUrlDraft"
+            type="url"
+            class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+            placeholder="https://www.youtube.com/watch?v=…"
+            autocomplete="off"
+            @keydown.enter.prevent="confirmVideoUrl"
+          />
+          <p
+            v-if="videoUrlError"
+            class="mt-2 text-sm text-red-600 dark:text-red-400"
+          >
+            {{ videoUrlError }}
+          </p>
+        </div>
+
+        <div class="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            @click="closeVideoUrlModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            @click="confirmVideoUrl"
+          >
+            Add video
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="flex w-full flex-col gap-4 lg:flex-row lg:items-stretch lg:gap-6"
+    >
+      <div class="flex min-w-0 flex-1 flex-col gap-4 px-4 pb-4 pt-4 lg:pr-0">
+        <div class="mx-auto w-full max-w-6xl">
+          <p
+            v-if="loadError"
+            class="shrink-0 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+          >
+            {{ loadError }}
+          </p>
+
+          <div class="flex flex-col gap-4">
+            <div
+              v-for="(sec, idx) in sections"
+              :key="sec.id"
+              :data-section-id="sec.id"
+              class="scroll-mt-4 flex items-start gap-2 rounded-lg transition-colors"
               :class="
-                isPinnedFirst(idx)
-                  ? 'cursor-default opacity-40'
-                  : 'cursor-grab hover:text-zinc-600 active:cursor-grabbing dark:hover:text-zinc-400'
+                dragOverIdx === idx && dragFrom !== null && dragFrom !== idx
+                  ? 'bg-indigo-50/90 ring-1 ring-indigo-200 dark:bg-indigo-950/40 dark:ring-indigo-800'
+                  : ''
               "
-              @dragstart="onDragStart($event, idx)"
-              @dragend="onDragEnd"
+              @dragover.prevent="onDragOver(idx)"
+              @drop.prevent="onDrop(idx)"
             >
-              <svg
-                class="size-5 shrink-0"
-                viewBox="0 0 8 20"
-                fill="currentColor"
-                preserveAspectRatio="xMidYMid meet"
-                aria-hidden="true"
-              >
-                <circle cx="2" cy="4" r="1.5" />
-                <circle cx="6" cy="4" r="1.5" />
-                <circle cx="2" cy="10" r="1.5" />
-                <circle cx="6" cy="10" r="1.5" />
-                <circle cx="2" cy="16" r="1.5" />
-                <circle cx="6" cy="16" r="1.5" />
-              </svg>
-            </span>
-            <button
-              v-if="sections.length > 1 && !isPinnedFirst(idx)"
-              type="button"
-              class="flex size-8 shrink-0 items-center justify-center rounded-md p-0 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800 dark:hover:text-red-400"
-              aria-label="Remove section"
-              @click="removeSection(idx)"
-            >
-              <TrashIcon class="size-4 shrink-0" aria-hidden="true" />
-            </button>
+              <div class="flex shrink-0 flex-col items-center gap-1.5 pt-2">
+                <span
+                  v-if="!(idx === 0 && sec.type === 'header')"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="
+                    isPinnedFirst(idx)
+                      ? 'Primary header - order is fixed'
+                      : 'Drag to reorder section'
+                  "
+                  :draggable="!isPinnedFirst(idx)"
+                  class="flex size-8 shrink-0 touch-none select-none items-center justify-center rounded-md text-zinc-400 dark:text-zinc-500"
+                  :class="
+                    isPinnedFirst(idx)
+                      ? 'cursor-default opacity-40'
+                      : 'cursor-grab hover:text-zinc-600 active:cursor-grabbing dark:hover:text-zinc-400'
+                  "
+                  @dragstart="onDragStart($event, idx)"
+                  @dragend="onDragEnd"
+                >
+                  <Bars3Icon class="size-5 shrink-0" aria-hidden="true" />
+                </span>
+                <div v-else class="size-8 shrink-0" aria-hidden="true" />
+                <button
+                  v-if="courseId != null && sec.type !== 'header'"
+                  type="button"
+                  class="flex size-8 shrink-0 items-center justify-center rounded-md p-0 text-zinc-400 hover:bg-zinc-100 hover:text-indigo-600 dark:hover:bg-zinc-800 dark:hover:text-indigo-400"
+                  :aria-label="
+                    isSectionPinned(sec.id)
+                      ? 'Remove from quick access'
+                      : 'Add to quick access'
+                  "
+                  :title="
+                    isSectionPinned(sec.id)
+                      ? 'Remove from quick access'
+                      : 'Add to quick access'
+                  "
+                  @click="onPinButtonClick(sec.id)"
+                >
+                  <BookmarkSolid
+                    v-if="isSectionPinned(sec.id)"
+                    class="size-4 shrink-0 text-indigo-600 dark:text-indigo-400"
+                    aria-hidden="true"
+                  />
+                  <BookmarkOutline
+                    v-else
+                    class="size-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  v-if="sections.length > 1 && !isPinnedFirst(idx)"
+                  type="button"
+                  class="flex size-8 shrink-0 items-center justify-center rounded-md p-0 text-zinc-400 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                  aria-label="Remove section"
+                  @click="removeSection(idx)"
+                >
+                  <TrashIcon class="size-4 shrink-0" aria-hidden="true" />
+                </button>
+              </div>
+              <div class="min-w-0 flex-1">
+                <HeaderSection
+                  v-if="sec.type === 'header'"
+                  v-model="sections[idx]"
+                />
+                <VocabularySection
+                  v-else-if="sec.type === 'vocabulary' && courseId != null"
+                  v-model="sections[idx]"
+                  :course-id="courseId"
+                  :all-sections="sections"
+                  :persist-workbook="flushPersist"
+                  :on-vocabulary-changed="() => emit('vocabulary-changed')"
+                />
+                <p
+                  v-else-if="sec.type === 'vocabulary'"
+                  class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+                >
+                  Vocabulary requires a course context.
+                </p>
+                <TranslationSection
+                  v-else-if="sec.type === 'translation'"
+                  v-model="sections[idx]"
+                  :source-lang="sourceLang"
+                  :target-lang="targetLang"
+                />
+                <VideoSection
+                  v-else-if="sec.type === 'video'"
+                  v-model="sections[idx]"
+                />
+                <SimpleTextSection v-else v-model="sections[idx]" />
+              </div>
+            </div>
           </div>
-          <div class="min-w-0 flex-1">
-            <HeaderSection v-if="sec.type === 'header'" v-model="sections[idx]" />
-            <VocabularySection v-else-if="sec.type === 'vocabulary'" v-model="sections[idx]" />
-            <TranslationSection
-              v-else-if="sec.type === 'translation'"
-              v-model="sections[idx]"
-              :source-lang="sourceLang"
-              :target-lang="targetLang"
-            />
-            <SimpleTextSection v-else v-model="sections[idx]" />
+
+          <SelectionDictionaryFloater
+            v-if="courseId != null"
+            :course-id="courseId"
+            :source-lang="sourceLang"
+            :target-lang="targetLang"
+            :add-entry="addSelectionToVocabulary"
+          />
+
+          <div
+            class="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-800"
+          >
+            <span class="text-xs font-medium text-zinc-500">Add section:</span>
+            <button
+              type="button"
+              class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              @click="addSection('translation')"
+            >
+              Translation
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              @click="addSection('header')"
+            >
+              Header
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              @click="addSection('vocabulary')"
+            >
+              Vocabulary
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              @click="openVideoUrlModal"
+            >
+              Video
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              @click="addSection('grammar')"
+            >
+              Grammar
+            </button>
           </div>
         </div>
       </div>
 
-      <div
-        class="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-800"
+      <aside
+        v-if="quickAccessEnabled"
+        class="flex min-h-0 w-full shrink-0 flex-col border-t border-zinc-200 px-4 pb-4 pt-4 dark:border-zinc-800 lg:sticky lg:top-0 lg:z-10 lg:h-[calc(var(--workbook-scroll-h))] lg:max-h-[calc(var(--workbook-scroll-h))] lg:w-[min(18rem,calc(100%-1rem))] lg:min-h-0 lg:shrink-0 lg:overflow-hidden lg:self-start lg:border-t-0 lg:px-0 lg:pb-4 lg:pt-4 lg:pl-0 lg:pr-3"
+        aria-label="Quick access and vocabulary"
       >
-        <span class="text-xs font-medium text-zinc-500">Add section:</span>
-        <button
-          type="button"
-          class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          @click="addSection('translation')"
-        >
-          Translation
-        </button>
-        <button
-          type="button"
-          class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          @click="addSection('header')"
-        >
-          Header
-        </button>
-        <button
-          type="button"
-          class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          @click="addSection('vocabulary')"
-        >
-          Vocabulary
-        </button>
-        <button
-          type="button"
-          class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          @click="addSection('grammar')"
-        >
-          Grammar
-        </button>
-      </div>
+        <div class="flex h-full min-h-0 flex-1 flex-col gap-2">
+          <div class="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
+            <slot name="quick-access" />
+          </div>
+          <div class="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
+            <slot name="course-vocabulary" />
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 </template>

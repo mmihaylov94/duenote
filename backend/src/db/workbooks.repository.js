@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "./pool.js";
 import { getCourse } from "./courses.repository.js";
+import * as coursePinsRepo from "./coursePins.repository.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -47,9 +48,15 @@ function rowToWorkbook(row) {
   };
 }
 
-export async function listWorkbooks() {
+export async function listWorkbooks(userId) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid)) return [];
   const { rows } = await pool.query(
-    `SELECT id, course_id, title, updated_at FROM workbooks ORDER BY updated_at DESC`,
+    `SELECT w.id, w.course_id, w.title, w.updated_at
+     FROM workbooks w
+     INNER JOIN courses c ON c.id = w.course_id AND c.user_id = $1
+     ORDER BY w.updated_at DESC`,
+    [uid],
   );
   return rows.map((r) => ({
     id: r.id,
@@ -59,21 +66,28 @@ export async function listWorkbooks() {
   }));
 }
 
-export async function getWorkbook(id) {
+export async function getWorkbook(id, userId) {
+  const wid = Number(id);
+  const uid = Number(userId);
+  if (!Number.isFinite(wid) || !Number.isFinite(uid)) return null;
   const { rows } = await pool.query(
-    `SELECT id, course_id, title, source_text, translation_text, source_lang, target_lang, content_json, created_at, updated_at
-     FROM workbooks WHERE id = $1`,
-    [id],
+    `SELECT w.id, w.course_id, w.title, w.source_lang, w.target_lang, w.content_json, w.created_at, w.updated_at
+     FROM workbooks w
+     INNER JOIN courses c ON c.id = w.course_id AND c.user_id = $2
+     WHERE w.id = $1`,
+    [wid, uid],
   );
   return rowToWorkbook(rows[0]);
 }
 
-export async function createWorkbook({ courseId, title = "Untitled" } = {}) {
+export async function createWorkbook(userId, { courseId, title = "Untitled" } = {}) {
   if (courseId == null || !Number.isFinite(Number(courseId))) {
     throw new Error("courseId is required");
   }
   const cid = Number(courseId);
-  const course = await getCourse(cid);
+  const uid = Number(userId);
+  if (!Number.isFinite(uid)) throw new Error("Invalid user");
+  const course = await getCourse(cid, uid);
   if (!course) {
     throw new Error("Course not found");
   }
@@ -82,16 +96,19 @@ export async function createWorkbook({ courseId, title = "Untitled" } = {}) {
   const tl = course.targetLang ?? "DE";
   const contentJson = JSON.stringify({ sections: [defaultHeaderSection()] });
   const { rows } = await pool.query(
-    `INSERT INTO workbooks (course_id, title, source_text, translation_text, source_lang, target_lang, content_json, created_at, updated_at)
-     VALUES ($1, $2, '', '', $3, $4, $5, $6::timestamptz, $7::timestamptz)
+    `INSERT INTO workbooks (course_id, title, source_lang, target_lang, content_json, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz)
      RETURNING id`,
     [cid, title.slice(0, 500), sl, tl, contentJson, t, t],
   );
   await pool.query(`UPDATE courses SET updated_at = $1::timestamptz WHERE id = $2`, [t, cid]);
-  return getWorkbook(rows[0].id);
+  return getWorkbook(rows[0].id, uid);
 }
 
-export async function updateWorkbook(id, fields) {
+export async function updateWorkbook(id, userId, fields) {
+  const existing = await getWorkbook(id, userId);
+  if (!existing) return null;
+
   const sets = [];
   const values = [];
   let n = 1;
@@ -114,47 +131,57 @@ export async function updateWorkbook(id, fields) {
     const firstTr = fields.sections.find((s) => s.type === "translation");
     const sl = firstTr?.sourceLang ?? fields.sourceLang ?? "EN";
     const tl = firstTr?.targetLang ?? fields.targetLang ?? "DE";
-    sets.push(`source_text = $${n++}`, `translation_text = $${n++}`, `source_lang = $${n++}`, `target_lang = $${n++}`);
-    values.push(firstTr?.sourceText ?? "", firstTr?.translationText ?? "", sl, tl);
+    sets.push(`source_lang = $${n++}`, `target_lang = $${n++}`);
+    values.push(sl, tl);
   }
 
   if (sets.length === 0) {
-    return getWorkbook(id);
+    return existing;
   }
 
   sets.push(`updated_at = $${n++}::timestamptz`);
   values.push(nowIso());
   values.push(id);
+  values.push(userId);
+  const pWb = values.length - 1;
+  const pUser = values.length;
 
   const { rowCount } = await pool.query(
-    `UPDATE workbooks SET ${sets.join(", ")} WHERE id = $${n}`,
+    `UPDATE workbooks w SET ${sets.join(", ")}
+     FROM courses c
+     WHERE w.id = $${pWb} AND w.course_id = c.id AND c.user_id = $${pUser}`,
     values,
   );
   if (rowCount === 0) return null;
-  const w = await getWorkbook(id);
+
+  if (Object.prototype.hasOwnProperty.call(fields, "sections")) {
+    const validIds = fields.sections.map((s) => s?.id).filter(Boolean);
+    await coursePinsRepo.deletePinsForMissingSections(existing.courseId, id, validIds);
+  }
+
+  const w = await getWorkbook(id, userId);
   if (w?.courseId) {
-    await pool.query(`UPDATE courses SET updated_at = $1::timestamptz WHERE id = $2`, [
-      nowIso(),
-      w.courseId,
-    ]);
+    await pool.query(`UPDATE courses SET updated_at = $1::timestamptz WHERE id = $2`, [nowIso(), w.courseId]);
   }
   return w;
 }
 
-export async function deleteWorkbook(id) {
-  const w = await getWorkbook(id);
-  const { rowCount } = await pool.query(`DELETE FROM workbooks WHERE id = $1`, [id]);
+export async function deleteWorkbook(id, userId) {
+  const w = await getWorkbook(id, userId);
+  if (!w) return false;
+  const { rowCount } = await pool.query(
+    `DELETE FROM workbooks w USING courses c
+     WHERE w.id = $1 AND w.course_id = c.id AND c.user_id = $2`,
+    [id, userId],
+  );
   if (rowCount > 0 && w?.courseId) {
-    await pool.query(`UPDATE courses SET updated_at = $1::timestamptz WHERE id = $2`, [
-      nowIso(),
-      w.courseId,
-    ]);
+    await pool.query(`UPDATE courses SET updated_at = $1::timestamptz WHERE id = $2`, [nowIso(), w.courseId]);
   }
   return rowCount > 0;
 }
 
-export async function duplicateWorkbook(id) {
-  const w = await getWorkbook(id);
+export async function duplicateWorkbook(id, userId) {
+  const w = await getWorkbook(id, userId);
   if (!w) return null;
   const newTitle = `Copy of ${w.title}`.slice(0, 500);
   const t = nowIso();
@@ -167,22 +194,16 @@ export async function duplicateWorkbook(id) {
   if (courseId == null) {
     throw new Error("Workbook missing courseId");
   }
+  const uid = Number(userId);
+  const course = await getCourse(courseId, uid);
+  if (!course) return null;
+
   const { rows } = await pool.query(
-    `INSERT INTO workbooks (course_id, title, source_text, translation_text, source_lang, target_lang, content_json, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz)
+    `INSERT INTO workbooks (course_id, title, source_lang, target_lang, content_json, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz)
      RETURNING id`,
-    [
-      courseId,
-      newTitle,
-      firstTr?.sourceText ?? "",
-      firstTr?.translationText ?? "",
-      sl,
-      tl,
-      contentJson,
-      t,
-      t,
-    ],
+    [courseId, newTitle, sl, tl, contentJson, t, t],
   );
   await pool.query(`UPDATE courses SET updated_at = $1::timestamptz WHERE id = $2`, [t, courseId]);
-  return getWorkbook(rows[0].id);
+  return getWorkbook(rows[0].id, uid);
 }

@@ -3,7 +3,10 @@ const section = defineModel({ type: Object, required: true });
 </script>
 
 <template>
-  <div class="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+  <div
+    data-dictionary-host
+    class="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+  >
     <input
       v-model="section.text"
       type="text"

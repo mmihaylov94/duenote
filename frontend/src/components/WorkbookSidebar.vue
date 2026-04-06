@@ -6,9 +6,11 @@ import {
   TrashIcon,
   ChevronDownIcon,
   EllipsisVerticalIcon,
+  MagnifyingGlassIcon,
 } from "@heroicons/vue/20/solid";
 import { DocumentDuplicateIcon } from "@heroicons/vue/24/outline";
 import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
+import SidebarProfile from "./SidebarProfile.vue";
 
 const collapsed = defineModel("collapsed", { type: Boolean, default: false });
 
@@ -16,6 +18,7 @@ const props = defineProps({
   courses: { type: Array, default: () => [] },
   activeWorkbookId: { type: Number, default: null },
   activeCourseId: { type: Number, default: null },
+  user: { type: Object, default: null },
 });
 
 const emit = defineEmits([
@@ -25,9 +28,12 @@ const emit = defineEmits([
   "rename-course",
   "course-languages",
   "course-vocabulary",
+  "course-search",
   "duplicate",
   "delete",
   "delete-course",
+  "open-settings",
+  "sign-out",
 ]);
 
 const editingCourseId = ref(null);
@@ -78,7 +84,8 @@ function onRenameBlur(courseId) {
 const courseMenuOpenId = ref(null);
 
 function toggleCourseMenu(courseId) {
-  courseMenuOpenId.value = courseMenuOpenId.value === courseId ? null : courseId;
+  courseMenuOpenId.value =
+    courseMenuOpenId.value === courseId ? null : courseId;
 }
 
 function closeCourseMenu() {
@@ -87,7 +94,7 @@ function closeCourseMenu() {
 
 function openRenameFromMenu(course) {
   closeCourseMenu();
-  // Wait for the menu to leave the DOM so focus isn’t stolen by the closing overlay.
+  // Wait for the menu to leave the DOM so focus isn't stolen by the closing overlay.
   nextTick(() => startRename(course));
 }
 
@@ -109,6 +116,11 @@ function openCourseLanguagesFromMenu(course) {
 function openCourseVocabularyFromMenu(course) {
   closeCourseMenu();
   emit("course-vocabulary", course);
+}
+
+function openCourseSearchFromMenu(course) {
+  closeCourseMenu();
+  emit("course-search", course);
 }
 
 function onDocumentPointerDown(e) {
@@ -149,7 +161,10 @@ watch(
     if (editingCourseId.value != null && !ids.includes(editingCourseId.value)) {
       editingCourseId.value = null;
     }
-    if (courseMenuOpenId.value != null && !ids.includes(courseMenuOpenId.value)) {
+    if (
+      courseMenuOpenId.value != null &&
+      !ids.includes(courseMenuOpenId.value)
+    ) {
       courseMenuOpenId.value = null;
     }
   },
@@ -195,7 +210,8 @@ function onCollapsedNewWorkbook() {
               aria-hidden="true"
               >DN</span
             >
-            <span class="truncate font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+            <span
+              class="truncate font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
               >DueNote</span
             >
           </div>
@@ -210,9 +226,16 @@ function onCollapsedNewWorkbook() {
           <PlusIcon class="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
-      <nav class="min-h-0 flex-1 overflow-y-auto p-2" aria-label="Courses and workbooks">
+      <nav
+        class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2"
+        aria-label="Courses and workbooks"
+      >
         <ul class="flex flex-col gap-2">
-          <li v-for="course in courses" :key="course.id" class="rounded-lg border border-zinc-100 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <li
+            v-for="course in courses"
+            :key="course.id"
+            class="rounded-lg border border-zinc-100 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-900/50"
+          >
             <div
               class="flex items-center gap-1 border-b border-zinc-100 px-1 py-1.5 dark:border-zinc-800"
               :class="
@@ -225,7 +248,11 @@ function onCollapsedNewWorkbook() {
                 type="button"
                 class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-white dark:hover:bg-zinc-800"
                 :aria-expanded="expanded[course.id] !== false"
-                :aria-label="expanded[course.id] === false ? 'Expand course' : 'Collapse course'"
+                :aria-label="
+                  expanded[course.id] === false
+                    ? 'Expand course'
+                    : 'Collapse course'
+                "
                 @click="toggleCourse(course.id)"
               >
                 <ChevronDownIcon
@@ -260,11 +287,7 @@ function onCollapsedNewWorkbook() {
                 class="h-8 w-8 shrink-0"
                 aria-hidden="true"
               />
-              <div
-                v-else
-                class="relative shrink-0"
-                data-course-menu
-              >
+              <div v-else class="relative shrink-0" data-course-menu>
                 <button
                   type="button"
                   class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
@@ -277,7 +300,7 @@ function onCollapsedNewWorkbook() {
                 </button>
                 <div
                   v-show="courseMenuOpenId === course.id"
-                  class="absolute right-0 top-full z-30 mt-0.5 min-w-[11rem] rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                  class="absolute right-0 top-full z-30 mt-0.5 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
                   role="menu"
                   :aria-label="`Actions for ${course.title || 'course'}`"
                 >
@@ -315,6 +338,18 @@ function onCollapsedNewWorkbook() {
                   </button>
                   <button
                     type="button"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    role="menuitem"
+                    @click="openCourseSearchFromMenu(course)"
+                  >
+                    <MagnifyingGlassIcon
+                      class="h-4 w-4 shrink-0 opacity-70"
+                      aria-hidden="true"
+                    />
+                    Search course
+                  </button>
+                  <button
+                    type="button"
                     class="flex w-full items-center gap-2 border-t border-zinc-100 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:border-zinc-800 dark:text-red-400 dark:hover:bg-red-950/40"
                     role="menuitem"
                     @click="deleteCourseFromMenu(course.id)"
@@ -324,7 +359,10 @@ function onCollapsedNewWorkbook() {
                 </div>
               </div>
             </div>
-            <ul v-show="expanded[course.id] !== false" class="flex flex-col gap-0.5 px-1 pb-1.5 pt-0.5">
+            <ul
+              v-show="expanded[course.id] !== false"
+              class="flex flex-col gap-0.5 px-1 pb-1.5 pt-0.5"
+            >
               <li v-for="w in course.workbooks || []" :key="w.id">
                 <div
                   class="flex items-center gap-1 rounded-lg border transition"
@@ -363,7 +401,7 @@ function onCollapsedNewWorkbook() {
                 v-if="!(course.workbooks && course.workbooks.length)"
                 class="px-2 py-2 text-xs text-zinc-500 dark:text-zinc-400"
               >
-                No workbooks yet — use the ⋮ menu on the course to add one.
+                No workbooks yet - use the ⋮ menu on the course to add one.
               </li>
             </ul>
           </li>
@@ -375,6 +413,12 @@ function onCollapsedNewWorkbook() {
           No courses yet. Use + in the header to create one.
         </p>
       </nav>
+      <SidebarProfile
+        :user="user"
+        :collapsed="false"
+        @open-settings="$emit('open-settings')"
+        @sign-out="$emit('sign-out')"
+      />
     </template>
 
     <!-- Collapsed -->
@@ -404,6 +448,14 @@ function onCollapsedNewWorkbook() {
       >
         <PlusIcon class="h-5 w-5" aria-hidden="true" />
       </button>
+      <div class="mt-auto w-full px-1 pb-1 pt-2">
+        <SidebarProfile
+          :user="user"
+          :collapsed="true"
+          @open-settings="$emit('open-settings')"
+          @sign-out="$emit('sign-out')"
+        />
+      </div>
     </div>
   </aside>
 </template>
