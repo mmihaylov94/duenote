@@ -134,8 +134,10 @@ let selTimer = null;
 function onSelectionChange() {
   clearTimeout(selTimer);
   selTimer = setTimeout(() => {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) syncFromSelection();
+    // Always sync: when the selection collapses or clears (delete, arrows, type-over),
+    // readSelection() returns empty and we must hide — we previously only synced when
+    // !sel.isCollapsed, which left the panel stuck visible.
+    syncFromSelection();
   }, 80);
 }
 

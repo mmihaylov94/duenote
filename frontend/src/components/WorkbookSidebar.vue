@@ -84,8 +84,7 @@ function onRenameBlur(courseId) {
 const courseMenuOpenId = ref(null);
 
 function toggleCourseMenu(courseId) {
-  courseMenuOpenId.value =
-    courseMenuOpenId.value === courseId ? null : courseId;
+  courseMenuOpenId.value = courseMenuOpenId.value === courseId ? null : courseId;
 }
 
 function closeCourseMenu() {
@@ -98,11 +97,6 @@ function openRenameFromMenu(course) {
   nextTick(() => startRename(course));
 }
 
-function addWorkbookFromMenu(courseId) {
-  closeCourseMenu();
-  emit("new-workbook", courseId);
-}
-
 function deleteCourseFromMenu(courseId) {
   closeCourseMenu();
   emit("delete-course", courseId);
@@ -111,16 +105,6 @@ function deleteCourseFromMenu(courseId) {
 function openCourseLanguagesFromMenu(course) {
   closeCourseMenu();
   emit("course-languages", course);
-}
-
-function openCourseVocabularyFromMenu(course) {
-  closeCourseMenu();
-  emit("course-vocabulary", course);
-}
-
-function openCourseSearchFromMenu(course) {
-  closeCourseMenu();
-  emit("course-search", course);
 }
 
 function onDocumentPointerDown(e) {
@@ -161,10 +145,7 @@ watch(
     if (editingCourseId.value != null && !ids.includes(editingCourseId.value)) {
       editingCourseId.value = null;
     }
-    if (
-      courseMenuOpenId.value != null &&
-      !ids.includes(courseMenuOpenId.value)
-    ) {
+    if (courseMenuOpenId.value != null && !ids.includes(courseMenuOpenId.value)) {
       courseMenuOpenId.value = null;
     }
   },
@@ -246,7 +227,7 @@ function onCollapsedNewWorkbook() {
             >
               <button
                 type="button"
-                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-white dark:hover:bg-zinc-800"
+                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-white dark:hover:bg-zinc-800"
                 :aria-expanded="expanded[course.id] !== false"
                 :aria-label="
                   expanded[course.id] === false
@@ -287,75 +268,66 @@ function onCollapsedNewWorkbook() {
                 class="h-8 w-8 shrink-0"
                 aria-hidden="true"
               />
-              <div v-else class="relative shrink-0" data-course-menu>
+              <div v-else class="flex shrink-0 items-center gap-0.5">
                 <button
                   type="button"
-                  class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                  :aria-expanded="courseMenuOpenId === course.id"
-                  aria-haspopup="true"
-                  :aria-label="`Course actions: ${course.title || 'Untitled course'}`"
-                  @click.stop="toggleCourseMenu(course.id)"
+                  class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  :aria-label="`New workbook in ${course.title || 'course'}`"
+                  @click.stop="$emit('new-workbook', course.id)"
                 >
-                  <EllipsisVerticalIcon class="h-5 w-5" aria-hidden="true" />
+                  <PlusIcon class="h-4 w-4" aria-hidden="true" />
                 </button>
-                <div
-                  v-show="courseMenuOpenId === course.id"
-                  class="absolute right-0 top-full z-30 mt-0.5 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                  role="menu"
-                  :aria-label="`Actions for ${course.title || 'course'}`"
+                <button
+                  type="button"
+                  class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  :aria-label="`Search ${course.title || 'course'}`"
+                  @click.stop="$emit('course-search', course)"
                 >
+                  <MagnifyingGlassIcon class="h-4 w-4" aria-hidden="true" />
+                </button>
+
+                <div class="relative" data-course-menu>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    role="menuitem"
-                    @click="openRenameFromMenu(course)"
+                    class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    :aria-expanded="courseMenuOpenId === course.id"
+                    aria-haspopup="true"
+                    :aria-label="`Course actions: ${course.title || 'Untitled course'}`"
+                    @click.stop="toggleCourseMenu(course.id)"
                   >
-                    Rename course
+                    <EllipsisVerticalIcon class="h-4 w-4" aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    role="menuitem"
-                    @click="addWorkbookFromMenu(course.id)"
+                  <div
+                    v-show="courseMenuOpenId === course.id"
+                    class="absolute right-0 top-full z-30 mt-0.5 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                    role="menu"
+                    :aria-label="`Actions for ${course.title || 'course'}`"
                   >
-                    New workbook
-                  </button>
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    role="menuitem"
-                    @click="openCourseLanguagesFromMenu(course)"
-                  >
-                    Languages
-                  </button>
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    role="menuitem"
-                    @click="openCourseVocabularyFromMenu(course)"
-                  >
-                    Vocabulary
-                  </button>
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    role="menuitem"
-                    @click="openCourseSearchFromMenu(course)"
-                  >
-                    <MagnifyingGlassIcon
-                      class="h-4 w-4 shrink-0 opacity-70"
-                      aria-hidden="true"
-                    />
-                    Search course
-                  </button>
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-2 border-t border-zinc-100 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:border-zinc-800 dark:text-red-400 dark:hover:bg-red-950/40"
-                    role="menuitem"
-                    @click="deleteCourseFromMenu(course.id)"
-                  >
-                    Delete course
-                  </button>
+                    <button
+                      type="button"
+                      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      role="menuitem"
+                      @click="openRenameFromMenu(course)"
+                    >
+                      Rename course
+                    </button>
+                    <button
+                      type="button"
+                      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      role="menuitem"
+                      @click="openCourseLanguagesFromMenu(course)"
+                    >
+                      Languages
+                    </button>
+                    <button
+                      type="button"
+                      class="flex w-full items-center gap-2 border-t border-zinc-100 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:border-zinc-800 dark:text-red-400 dark:hover:bg-red-950/40"
+                      role="menuitem"
+                      @click="deleteCourseFromMenu(course.id)"
+                    >
+                      Delete course
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -374,14 +346,14 @@ function onCollapsedNewWorkbook() {
                 >
                   <button
                     type="button"
-                    class="min-w-0 flex-1 truncate px-2 py-2 pl-3 text-left text-sm text-zinc-800 dark:text-zinc-200"
+                    class="min-w-0 flex-1 truncate px-2 py-1.5 pl-3 text-left text-sm text-zinc-800 dark:text-zinc-200"
                     @click="$emit('select', w.id)"
                   >
                     {{ w.title || "Untitled" }}
                   </button>
                   <button
                     type="button"
-                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-white/80 hover:text-zinc-800 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-white/80 hover:text-zinc-800 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
                     aria-label="Duplicate workbook"
                     @click.stop="$emit('duplicate', w.id)"
                   >
@@ -389,7 +361,7 @@ function onCollapsedNewWorkbook() {
                   </button>
                   <button
                     type="button"
-                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/50 dark:hover:text-red-300"
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/50 dark:hover:text-red-300"
                     aria-label="Delete workbook"
                     @click.stop="$emit('delete', w.id)"
                   >
@@ -402,6 +374,16 @@ function onCollapsedNewWorkbook() {
                 class="px-2 py-2 text-xs text-zinc-500 dark:text-zinc-400"
               >
                 No workbooks yet - use the ⋮ menu on the course to add one.
+              </li>
+              <li class="px-1 pt-1">
+                <div class="border-t border-zinc-200 dark:border-zinc-800"></div>
+                <button
+                  type="button"
+                  class="mt-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/80 dark:hover:text-zinc-100"
+                  @click="$emit('course-vocabulary', course)"
+                >
+                  <span>Vocabulary</span>
+                </button>
               </li>
             </ul>
           </li>

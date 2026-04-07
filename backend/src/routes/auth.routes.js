@@ -5,6 +5,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import * as usersRepo from "../db/users.repository.js";
 import * as otpRepo from "../db/otp.repository.js";
+import { pool } from "../db/pool.js";
 import { sendOtpEmail } from "../services/mail.service.js";
 import * as avatarService from "../services/avatar.service.js";
 import { config } from "../config.js";
@@ -167,6 +168,58 @@ authRouter.delete(
     await avatarService.deleteStoredAvatar(uid);
     const user = await usersRepo.setAvatarUrl(uid, null);
     res.json(publicUser(user));
+  }),
+);
+
+function destroySession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.destroy((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+authRouter.delete(
+  "/me",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const uid = Number(req.session.userId);
+
+    const user = await usersRepo.findUserById(uid);
+    if (!user) return res.status(404).json({ error: "Not found" });
+
+    // Best-effort cleanup of uploaded avatars (local disk / S3). Safe if user had no upload.
+    await avatarService.deleteStoredAvatar(uid);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Email OTP challenges are not FK-linked; remove any leftovers for this email.
+      await client.query(`DELETE FROM email_otp_challenges WHERE lower(email) = $1`, [
+        String(user.email || "").trim().toLowerCase(),
+      ]);
+
+      // Cascades take care of courses/workbooks/vocabulary/pins/etc.
+      const del = await client.query(`DELETE FROM users WHERE id = $1 RETURNING id`, [uid]);
+      if (del.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Not found" });
+      }
+
+      await client.query("COMMIT");
+    } catch (e) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    await destroySession(req);
+    res.clearCookie(config.sessionCookieName, { path: "/" });
+    res.status(204).end();
   }),
 );
 

@@ -377,7 +377,19 @@ async function commitDraft(draft) {
   }
 }
 
-function onDraftWordBlur(draft) {
+/** Skip commit when tabbing Word → Meaning so focus isn’t lost mid-entry */
+function onDraftWordBlur(draft, e) {
+  const next = e?.relatedTarget;
+  if (
+    next instanceof HTMLElement &&
+    next.getAttribute("data-draft-meaning-for") === draft.key
+  ) {
+    return;
+  }
+  commitDraft(draft);
+}
+
+function onDraftMeaningBlur(draft) {
   commitDraft(draft);
 }
 
@@ -481,7 +493,7 @@ watch(
                 placeholder="Word"
                 autocomplete="off"
                 @input="scheduleDraftSearch(draft)"
-                @blur="onDraftWordBlur(draft)"
+                @blur="onDraftWordBlur(draft, $event)"
               />
               <ul
                 v-if="draft.suggestions.length > 0 && draft.word.trim()"
@@ -506,7 +518,8 @@ watch(
                 type="text"
                 class="w-full rounded border border-zinc-200 bg-white px-2 py-1.5 text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
                 placeholder="Meaning"
-                @blur="onDraftWordBlur(draft)"
+                :data-draft-meaning-for="draft.key"
+                @blur="onDraftMeaningBlur(draft)"
               />
             </td>
             <td class="py-1.5 align-top">
