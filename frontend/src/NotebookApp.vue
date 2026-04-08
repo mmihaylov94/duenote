@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import WorkbookSidebar from "./components/WorkbookSidebar.vue";
 import TranslatorView from "./components/TranslatorView.vue";
 import CourseVocabularyPanel from "./components/CourseVocabularyPanel.vue";
+import CourseMaterialsPanel from "./components/CourseMaterialsPanel.vue";
 import CourseSearchModal from "./components/CourseSearchModal.vue";
 import CourseQuickAccessMenu from "./components/CourseQuickAccessMenu.vue";
 import CourseVocabularyQuickRef from "./components/CourseVocabularyQuickRef.vue";
@@ -59,6 +60,9 @@ const courseLangDraftTarget = ref("DE");
 const vocabularyCourse = ref(null);
 const vocabularyPanelRef = ref(null);
 const courseVocabularyQuickRef = ref(null);
+
+/** Set when course materials panel is open `{ id, title }` */
+const materialsCourse = ref(null);
 
 /** Set when course search modal is open `{ id, title }` */
 const searchCourse = ref(null);
@@ -335,6 +339,10 @@ function openCourseVocabulary(course) {
   vocabularyCourse.value = { id: course.id, title: course.title };
 }
 
+function openCourseMaterials(course) {
+  materialsCourse.value = { id: course.id, title: course.title };
+}
+
 function selectWorkbook(id) {
   clearTitleTimer();
   currentWorkbookId.value = id;
@@ -589,6 +597,7 @@ onMounted(async () => {
         @rename-course="renameCourse"
         @course-languages="openCourseLanguages"
         @course-vocabulary="openCourseVocabulary"
+        @course-materials="openCourseMaterials"
         @course-search="openCourseSearch"
         @duplicate="duplicateWorkbook"
         @delete="deleteWorkbook"
@@ -799,6 +808,12 @@ onMounted(async () => {
       ref="vocabularyPanelRef"
       :course="vocabularyCourse"
       @close="vocabularyCourse = null"
+    />
+
+    <CourseMaterialsPanel
+      v-if="materialsCourse"
+      :course="materialsCourse"
+      @close="materialsCourse = null"
     />
 
     <ProfileSettingsModal

@@ -11,6 +11,8 @@
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
     "@vueup/vue-quill": "^1.2.0",
+    "interactjs": "^1.10.27",
+    "pdfjs-dist": "^5.4.149",
     "vue": "^3.5.30",
     "vue-router": "^4.6.4"
   },

@@ -57,6 +57,10 @@ export const config = {
   /** Directory for locally uploaded avatars (created on first upload). */
   avatarLocalDir: trim(process.env.AVATAR_UPLOAD_DIR) || "./data/uploads/avatars",
   avatarMaxBytes: Math.min(Number(process.env.AVATAR_MAX_BYTES) || 2 * 1024 * 1024, 5 * 1024 * 1024),
+  /** Directory for locally uploaded course materials (created on first upload). */
+  materialsLocalDir: trim(process.env.MATERIALS_UPLOAD_DIR) || "./data/uploads/materials",
+  /** Max upload size for materials (bytes). */
+  materialsMaxBytes: Math.min(Number(process.env.MATERIALS_MAX_BYTES) || 25 * 1024 * 1024, 250 * 1024 * 1024),
   /** When set with region, new avatar uploads go to S3 instead of disk. */
   s3Bucket: trim(process.env.S3_BUCKET),
   s3Region: trim(process.env.S3_REGION),

@@ -1,10 +1,14 @@
 import { Router } from "express";
+import multer from "multer";
 import * as courseRepo from "../db/courses.repository.js";
 import * as coursePinsRepo from "../db/coursePins.repository.js";
 import * as vocabEntriesRepo from "../db/vocabularyEntries.repository.js";
+import * as materialsRepo from "../db/materials.repository.js";
 import { normalizeLangOrDefault, normalizeLangRequired } from "../utils/languages.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { config } from "../config.js";
+import { storeMaterial, deleteStoredMaterial, streamStoredMaterialToResponse } from "../services/materials.service.js";
 
 export const coursesRouter = Router();
 coursesRouter.use(requireAuth);
@@ -12,6 +16,20 @@ coursesRouter.use(requireAuth);
 function userId(req) {
   return Number(req.session.userId);
 }
+
+const uploadMaterial = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: config.materialsMaxBytes },
+});
+
+function extLower(name) {
+  const s = String(name || "");
+  const idx = s.lastIndexOf(".");
+  if (idx < 0) return "";
+  return s.slice(idx).toLowerCase();
+}
+
+const ALLOWED_EXTS = new Set([".pdf", ".doc", ".docx", ".txt"]);
 
 coursesRouter.get(
   "/",
@@ -117,6 +135,149 @@ coursesRouter.get(
     const data = await courseRepo.getCourseVocabulary(id, userId(req));
     if (!data) return res.status(404).json({ error: "Not found" });
     res.json(data);
+  }),
+);
+
+coursesRouter.get(
+  "/:id/materials",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const course = await courseRepo.getCourse(id, userId(req));
+    if (!course) return res.status(404).json({ error: "Not found" });
+
+    const data = await materialsRepo.listMaterials(id, userId(req));
+    if (!data) return res.status(404).json({ error: "Not found" });
+
+    res.json({
+      courseId: course.id,
+      courseTitle: course.title,
+      materials: data.materials.map((m) => ({
+        id: m.id,
+        title: m.title,
+        mimeType: m.mimeType,
+        byteSize: m.byteSize,
+        createdAt: m.createdAt,
+      })),
+    });
+  }),
+);
+
+coursesRouter.post(
+  "/:id/materials",
+  (req, res, next) => {
+    uploadMaterial.single("file")(req, res, (err) => {
+      if (!err) return next();
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "File too large" });
+      }
+      return res.status(400).json({ error: err.message || "Upload failed" });
+    });
+  },
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const course = await courseRepo.getCourse(id, userId(req));
+    if (!course) return res.status(404).json({ error: "Not found" });
+
+    const file = req.file;
+    if (!file?.buffer) return res.status(400).json({ error: "Missing file" });
+
+    const originalName = String(file.originalname || "file").trim().slice(0, 500);
+    const ext = extLower(originalName);
+    if (!ALLOWED_EXTS.has(ext)) {
+      return res.status(400).json({ error: "Unsupported file type" });
+    }
+    const mimeType = String(file.mimetype || "application/octet-stream").slice(0, 200);
+    const byteSize = Number(file.size) || file.buffer.length || 0;
+
+    // Create DB row first to get a stable id for storage keys.
+    const placeholder = await materialsRepo.createMaterial(id, userId(req), {
+      title: originalName || "Untitled",
+      mimeType,
+      byteSize,
+      storage: "pending",
+      storageKey: "pending",
+    });
+    if (!placeholder) return res.status(404).json({ error: "Not found" });
+
+    try {
+      const stored = await storeMaterial({
+        courseId: id,
+        materialId: placeholder.id,
+        buffer: file.buffer,
+        mimeType,
+        originalName,
+      });
+
+      const created = await materialsRepo.updateMaterialStorage(id, userId(req), placeholder.id, {
+        storage: stored.storage,
+        storageKey: stored.storageKey,
+      });
+      if (!created) return res.status(500).json({ error: "Could not finalize upload" });
+
+      res.status(201).json({
+        id: created.id,
+        title: created.title,
+        mimeType: created.mimeType,
+        byteSize: created.byteSize,
+        createdAt: created.createdAt,
+      });
+    } catch (e) {
+      // Best-effort cleanup of stored object if we got that far.
+      try {
+        const current = await materialsRepo.getMaterial(id, userId(req), placeholder.id);
+        if (current?.storage && current?.storageKey && current.storage !== "pending") {
+          await deleteStoredMaterial({ storage: current.storage, storageKey: current.storageKey });
+        }
+      } catch {
+        /* ignore */
+      }
+      throw e;
+    }
+  }),
+);
+
+coursesRouter.delete(
+  "/:id/materials/:materialId",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const materialId = Number(req.params.materialId);
+    if (!Number.isFinite(id) || !Number.isFinite(materialId)) return res.status(400).json({ error: "Invalid id" });
+
+    const material = await materialsRepo.getMaterial(id, userId(req), materialId);
+    if (!material) return res.status(404).json({ error: "Not found" });
+
+    await deleteStoredMaterial({ storage: material.storage, storageKey: material.storageKey });
+    const result = await materialsRepo.deleteMaterial(id, userId(req), materialId);
+    if (!result.ok) return res.status(404).json({ error: "Not found" });
+
+    res.status(204).end();
+  }),
+);
+
+coursesRouter.get(
+  "/:id/materials/:materialId/download",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const materialId = Number(req.params.materialId);
+    if (!Number.isFinite(id) || !Number.isFinite(materialId)) return res.status(400).json({ error: "Invalid id" });
+
+    const material = await materialsRepo.getMaterial(id, userId(req), materialId);
+    if (!material) return res.status(404).json({ error: "Not found" });
+
+    const ok = await streamStoredMaterialToResponse(
+      {
+        storage: material.storage,
+        storageKey: material.storageKey,
+        mimeType: material.mimeType,
+        filename: material.title,
+      },
+      res,
+    );
+    if (!ok) return res.status(404).end();
   }),
 );
 

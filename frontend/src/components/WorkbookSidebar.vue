@@ -28,6 +28,7 @@ const emit = defineEmits([
   "rename-course",
   "course-languages",
   "course-vocabulary",
+  "course-materials",
   "course-search",
   "duplicate",
   "delete",
@@ -383,6 +384,15 @@ function onCollapsedNewWorkbook() {
                   @click="$emit('course-vocabulary', course)"
                 >
                   <span>Vocabulary</span>
+                </button>
+              </li>
+              <li class="px-1">
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/80 dark:hover:text-zinc-100"
+                  @click="$emit('course-materials', course)"
+                >
+                  <span>Materials</span>
                 </button>
               </li>
             </ul>

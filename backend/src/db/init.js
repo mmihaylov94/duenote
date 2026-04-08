@@ -144,6 +144,25 @@ async function ensureCourseSectionPinsTable() {
   `);
 }
 
+async function ensureCourseMaterialsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS course_materials (
+      id SERIAL PRIMARY KEY,
+      course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      storage TEXT NOT NULL,
+      storage_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_course_materials_course_created
+    ON course_materials (course_id, created_at DESC, id DESC);
+  `);
+}
+
 export async function initDatabase() {
   await ensureUsersTable();
   await ensureEmailOtpTable();
@@ -163,6 +182,7 @@ export async function initDatabase() {
   await ensureCoursesSchema();
   await ensureCourseVocabularyEntriesTable();
   await ensureCourseSectionPinsTable();
+  await ensureCourseMaterialsTable();
 
   const cfg = pgConfigFromEnv();
   const label = cfg.connectionString

@@ -14,6 +14,7 @@ import VocabularySection from "./VocabularySection.vue";
 import SimpleTextSection from "./SimpleTextSection.vue";
 import SelectionDictionaryFloater from "./SelectionDictionaryFloater.vue";
 import VideoSection from "./VideoSection.vue";
+import DocumentSection from "./DocumentSection.vue";
 import { apiFetch } from "../api/client.js";
 
 const props = defineProps({
@@ -49,6 +50,13 @@ const SAVE_DEBOUNCE_MS = 1000;
 const videoUrlModalOpen = ref(false);
 const videoUrlDraft = ref("");
 const videoUrlError = ref("");
+
+const documentModalOpen = ref(false);
+const documentModalError = ref("");
+const pdfMaterials = ref([]);
+const pdfMaterialIdDraft = ref("");
+const pdfPagesFromDraft = ref("");
+const pdfPagesToDraft = ref("");
 
 function normalizeUrl(s) {
   let v = String(s ?? "").trim();
@@ -114,6 +122,18 @@ function newSection(kind) {
       url: "",
     };
   }
+  if (kind === "document") {
+    return {
+      id,
+      type: "document",
+      materialId: null,
+      materialTitle: "",
+      pagesFrom: null,
+      pagesTo: null,
+      viewMode: "spread",
+      notes: [],
+    };
+  }
   return { id, type: kind, text: "" };
 }
 
@@ -145,6 +165,35 @@ function ensureSectionShape(list) {
         id,
         type: "video",
         url: typeof s.url === "string" ? s.url : "",
+      };
+    }
+    if (s.type === "document") {
+      const materialId = s.materialId != null ? Number(s.materialId) : null;
+      const materialTitle = typeof s.materialTitle === "string" ? s.materialTitle : "";
+      const pagesFrom = s.pagesFrom != null ? Number(s.pagesFrom) : null;
+      const pagesTo = s.pagesTo != null ? Number(s.pagesTo) : null;
+      const viewModeRaw = typeof s.viewMode === "string" ? s.viewMode : "";
+      const viewMode = viewModeRaw === "single" ? "single" : "spread";
+      const notes = Array.isArray(s.notes) ? s.notes : [];
+      return {
+        id,
+        type: "document",
+        materialId: Number.isFinite(materialId) ? materialId : null,
+        materialTitle,
+        pagesFrom: Number.isFinite(pagesFrom) ? pagesFrom : null,
+        pagesTo: Number.isFinite(pagesTo) ? pagesTo : null,
+        viewMode,
+        notes: notes
+          .filter((n) => n && typeof n === "object")
+          .map((n) => ({
+            id: n.id || crypto.randomUUID(),
+            page: Number.isFinite(Number(n.page)) ? Number(n.page) : 1,
+            x: Number.isFinite(Number(n.x)) ? Number(n.x) : 0.1,
+            y: Number.isFinite(Number(n.y)) ? Number(n.y) : 0.1,
+            text: typeof n.text === "string" ? n.text : "",
+            fontSize: Number.isFinite(Number(n.fontSize)) ? Number(n.fontSize) : 16,
+            color: n.color === "light" ? "light" : "black",
+          })),
       };
     }
     return {
@@ -338,6 +387,91 @@ function confirmVideoUrl() {
   closeVideoUrlModal();
 }
 
+async function openDocumentModal() {
+  documentModalError.value = "";
+  pdfMaterials.value = [];
+  pdfMaterialIdDraft.value = "";
+  pdfPagesFromDraft.value = "";
+  pdfPagesToDraft.value = "";
+
+  const cid = props.courseId;
+  if (cid == null) {
+    documentModalError.value = "Documents require a course context.";
+    documentModalOpen.value = true;
+    return;
+  }
+
+  documentModalOpen.value = true;
+  try {
+    const r = await apiFetch(`/api/courses/${cid}/materials`);
+    if (!r.ok) {
+      documentModalError.value = `Could not load materials (HTTP ${r.status}).`;
+      return;
+    }
+    const data = await r.json();
+    const list = Array.isArray(data.materials) ? data.materials : [];
+    pdfMaterials.value = list.filter((m) =>
+      String(m.mimeType || "").toLowerCase().includes("pdf") ||
+      String(m.title || "").toLowerCase().endsWith(".pdf"),
+    );
+  } catch {
+    documentModalError.value = "Cannot reach the API.";
+  }
+}
+
+function closeDocumentModal() {
+  if (!documentModalOpen.value) return;
+  documentModalOpen.value = false;
+  documentModalError.value = "";
+  pdfMaterialIdDraft.value = "";
+  pdfPagesFromDraft.value = "";
+  pdfPagesToDraft.value = "";
+  pdfMaterials.value = [];
+}
+
+function confirmDocument() {
+  const cid = props.courseId;
+  if (cid == null) {
+    documentModalError.value = "Documents require a course context.";
+    return;
+  }
+  const mid = Number(pdfMaterialIdDraft.value);
+  if (!Number.isFinite(mid) || mid <= 0) {
+    documentModalError.value = "Choose a PDF material.";
+    return;
+  }
+  const fromRaw = pdfPagesFromDraft.value.trim();
+  const toRaw = pdfPagesToDraft.value.trim();
+  const from = fromRaw ? Number(fromRaw) : null;
+  const to = toRaw ? Number(toRaw) : null;
+  if ((from != null && (!Number.isFinite(from) || from <= 0)) || (to != null && (!Number.isFinite(to) || to <= 0))) {
+    documentModalError.value = "Pages must be positive numbers.";
+    return;
+  }
+  if (from != null && to != null && to < from) {
+    documentModalError.value = "Page to must be ≥ page from.";
+    return;
+  }
+
+  const sec = newSection("document");
+  sec.materialId = mid;
+  // If only one bound is provided, treat it as a single-page view.
+  if (from != null && to == null) {
+    sec.pagesFrom = from;
+    sec.pagesTo = from;
+  } else if (to != null && from == null) {
+    sec.pagesFrom = to;
+    sec.pagesTo = to;
+  } else {
+    sec.pagesFrom = from;
+    sec.pagesTo = to;
+  }
+  const picked = pdfMaterials.value.find((m) => Number(m.id) === mid);
+  sec.materialTitle = picked?.title ? String(picked.title) : "";
+  sections.value = [...sections.value, sec];
+  closeDocumentModal();
+}
+
 function isPinnedFirst(idx) {
   return idx === 0;
 }
@@ -479,6 +613,89 @@ async function addSelectionToVocabulary(word, meaning) {
     </div>
 
     <div
+      v-if="documentModalOpen"
+      class="fixed inset-0 z-[103] flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add document"
+      @click.self="closeDocumentModal"
+    >
+      <div
+        class="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        @click.stop
+      >
+        <h2 class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+          Add document
+        </h2>
+        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Choose a PDF from course materials and optionally limit the page range.
+        </p>
+
+        <div class="mt-4">
+          <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300">PDF material</label>
+          <select
+            v-model="pdfMaterialIdDraft"
+            class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          >
+            <option value="">Select a PDF…</option>
+            <option v-for="m in pdfMaterials" :key="m.id" :value="String(m.id)">
+              {{ m.title || `PDF #${m.id}` }}
+            </option>
+          </select>
+          <p v-if="!documentModalError && pdfMaterials.length === 0" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            No PDFs found in this course’s Materials yet.
+          </p>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Page from</label>
+            <input
+              v-model="pdfPagesFromDraft"
+              type="text"
+              inputmode="numeric"
+              placeholder="(all)"
+              class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+              @keydown.enter.prevent="confirmDocument"
+            />
+          </div>
+          <div>
+            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Page to</label>
+            <input
+              v-model="pdfPagesToDraft"
+              type="text"
+              inputmode="numeric"
+              placeholder="(all)"
+              class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+              @keydown.enter.prevent="confirmDocument"
+            />
+          </div>
+        </div>
+
+        <p v-if="documentModalError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+          {{ documentModalError }}
+        </p>
+
+        <div class="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            @click="closeDocumentModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            @click="confirmDocument"
+          >
+            Add document
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
       class="flex w-full flex-col gap-4 lg:flex-row lg:items-stretch lg:gap-6"
     >
       <div class="flex min-w-0 flex-1 flex-col gap-4 px-4 pb-4 pt-4 lg:pr-0">
@@ -593,6 +810,11 @@ async function addSelectionToVocabulary(word, meaning) {
                   v-else-if="sec.type === 'video'"
                   v-model="sections[idx]"
                 />
+                <DocumentSection
+                  v-else-if="sec.type === 'document'"
+                  v-model="sections[idx]"
+                  :course-id="courseId"
+                />
                 <SimpleTextSection v-else v-model="sections[idx]" />
               </div>
             </div>
@@ -637,6 +859,13 @@ async function addSelectionToVocabulary(word, meaning) {
               @click="openVideoUrlModal"
             >
               Video
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              @click="openDocumentModal"
+            >
+              Document
             </button>
             <button
               type="button"
