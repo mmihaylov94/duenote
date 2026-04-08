@@ -224,7 +224,9 @@ async function onPinClick({ sectionId, isPinned }) {
     );
     if (!pin) return;
     try {
-      const r = await apiFetch(`/api/courses/${cid}/pins/${pin.id}`, { method: "DELETE" });
+      const r = await apiFetch(`/api/courses/${cid}/pins/${pin.id}`, {
+        method: "DELETE",
+      });
       if (r.ok) await loadPins();
     } catch {
       /* ignore */
@@ -298,7 +300,9 @@ async function onDeletePin(pinId) {
   const cid = currentCourseId.value;
   if (cid == null) return;
   try {
-    const r = await apiFetch(`/api/courses/${cid}/pins/${pinId}`, { method: "DELETE" });
+    const r = await apiFetch(`/api/courses/${cid}/pins/${pinId}`, {
+      method: "DELETE",
+    });
     if (r.ok) await loadPins();
   } catch {
     /* ignore */
@@ -513,11 +517,14 @@ async function createWorkbook(courseId) {
 
 async function duplicateWorkbook(id) {
   clearTitleTimer();
-  const r = await apiFetch(`/api/workbooks/${id}/duplicate`, { method: "POST" });
+  const r = await apiFetch(`/api/workbooks/${id}/duplicate`, {
+    method: "POST",
+  });
   if (!r.ok) return;
   const w = await r.json();
   await fetchCourses();
-  currentCourseId.value = w.courseId ?? findWorkbookCourse(w.id) ?? currentCourseId.value;
+  currentCourseId.value =
+    w.courseId ?? findWorkbookCourse(w.id) ?? currentCourseId.value;
   currentWorkbookId.value = w.id;
   workbookTitle.value = w.title;
   wbSourceLang.value = w.sourceLang ?? "EN";
@@ -532,7 +539,8 @@ async function deleteWorkbook(id) {
   await fetchCourses();
   const flat = firstWorkbookInTree(courses.value);
   if (!flat) {
-    const cid = deletedCourseId ?? currentCourseId.value ?? courses.value[0]?.id;
+    const cid =
+      deletedCourseId ?? currentCourseId.value ?? courses.value[0]?.id;
     if (cid != null) {
       currentCourseId.value = cid;
       await createWorkbook(cid);
@@ -569,7 +577,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex h-[100dvh] min-h-0 flex-col bg-zinc-100 dark:bg-zinc-950">
+  <div class="flex h-dvh min-h-0 flex-col bg-zinc-100 dark:bg-zinc-950">
     <p
       v-if="apiError"
       class="shrink-0 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-100"
@@ -628,7 +636,11 @@ onMounted(async () => {
                 v-model="wbSourceLang"
                 class="min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
               >
-                <option v-for="lang in LANGUAGES" :key="'from-' + lang.code" :value="lang.code">
+                <option
+                  v-for="lang in LANGUAGES"
+                  :key="'from-' + lang.code"
+                  :value="lang.code"
+                >
                   {{ lang.label }}
                 </option>
               </select>
@@ -645,17 +657,18 @@ onMounted(async () => {
                 v-model="wbTargetLang"
                 class="min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
               >
-                <option v-for="lang in LANGUAGES" :key="'to-' + lang.code" :value="lang.code">
+                <option
+                  v-for="lang in LANGUAGES"
+                  :key="'to-' + lang.code"
+                  :value="lang.code"
+                >
                   {{ lang.label }}
                 </option>
               </select>
             </div>
           </div>
         </div>
-        <div
-          ref="workbookScrollEl"
-          class="min-h-0 flex-1 overflow-auto"
-        >
+        <div ref="workbookScrollEl" class="min-h-0 flex-1 overflow-auto">
           <TranslatorView
             v-if="currentWorkbookId != null"
             :key="currentWorkbookId"
@@ -700,7 +713,7 @@ onMounted(async () => {
           </TranslatorView>
           <div
             v-else
-            class="flex min-h-[12rem] flex-col items-center justify-center gap-2 px-6 text-center text-zinc-500 dark:text-zinc-400"
+            class="flex min-h-48 flex-col items-center justify-center gap-2 px-6 text-center text-zinc-500 dark:text-zinc-400"
           >
             <p class="text-sm">No workbook selected.</p>
             <p class="text-xs">Add a workbook to a course from the sidebar.</p>
@@ -711,7 +724,7 @@ onMounted(async () => {
 
     <div
       v-if="courseLanguagesModal"
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+      class="fixed inset-0 z-100 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="course-lang-dialog-title"
@@ -748,7 +761,11 @@ onMounted(async () => {
             v-model="courseLangDraftSource"
             class="w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           >
-            <option v-for="lang in LANGUAGES" :key="'cms-' + lang.code" :value="lang.code">
+            <option
+              v-for="lang in LANGUAGES"
+              :key="'cms-' + lang.code"
+              :value="lang.code"
+            >
               {{ lang.label }}
             </option>
           </select>
@@ -763,7 +780,11 @@ onMounted(async () => {
             v-model="courseLangDraftTarget"
             class="w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           >
-            <option v-for="lang in LANGUAGES" :key="'cmd-' + lang.code" :value="lang.code">
+            <option
+              v-for="lang in LANGUAGES"
+              :key="'cmd-' + lang.code"
+              :value="lang.code"
+            >
               {{ lang.label }}
             </option>
           </select>

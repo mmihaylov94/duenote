@@ -277,7 +277,7 @@ coursesRouter.get(
       },
       res,
     );
-    if (!ok) return res.status(404).end();
+    if (!ok) return res.status(404).json({ error: "File missing" });
   }),
 );
 

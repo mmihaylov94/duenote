@@ -89,7 +89,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="fixed inset-0 z-[101] flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-101 flex items-center justify-center bg-black/40 p-4"
     role="dialog"
     aria-modal="true"
     aria-labelledby="course-vocab-title"
@@ -201,14 +201,14 @@ onUnmounted(() => {
                 <td
                   class="max-w-[200px] py-2 pr-3 align-top text-zinc-900 dark:text-zinc-100"
                 >
-                  <span class="whitespace-pre-wrap break-words">{{
+                  <span class="whitespace-pre-wrap wrap-break-word">{{
                     row.word || "-"
                   }}</span>
                 </td>
                 <td
                   class="max-w-[240px] py-2 pr-3 align-top text-zinc-800 dark:text-zinc-200"
                 >
-                  <span class="whitespace-pre-wrap break-words">{{
+                  <span class="whitespace-pre-wrap wrap-break-word">{{
                     row.meaning || "-"
                   }}</span>
                 </td>
@@ -216,7 +216,7 @@ onUnmounted(() => {
                   class="max-w-[160px] py-2 align-top text-zinc-500 dark:text-zinc-400"
                 >
                   <span
-                    class="line-clamp-2 break-words"
+                    class="line-clamp-2 wrap-break-word"
                     :title="row.workbookTitle"
                     >{{ row.workbookTitle }}</span
                   >

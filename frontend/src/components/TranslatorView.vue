@@ -16,6 +16,7 @@ import SelectionDictionaryFloater from "./SelectionDictionaryFloater.vue";
 import VideoSection from "./VideoSection.vue";
 import DocumentSection from "./DocumentSection.vue";
 import { apiFetch } from "../api/client.js";
+import * as pdfjsLib from "pdfjs-dist";
 
 const props = defineProps({
   workbookId: { type: Number, required: true },
@@ -57,6 +58,9 @@ const pdfMaterials = ref([]);
 const pdfMaterialIdDraft = ref("");
 const pdfPagesFromDraft = ref("");
 const pdfPagesToDraft = ref("");
+const pdfPageCount = ref(null);
+const pdfPageCountLoading = ref(false);
+const pdfPageCountError = ref("");
 
 function normalizeUrl(s) {
   let v = String(s ?? "").trim();
@@ -170,7 +174,8 @@ function ensureSectionShape(list) {
     }
     if (s.type === "document") {
       const materialId = s.materialId != null ? Number(s.materialId) : null;
-      const materialTitle = typeof s.materialTitle === "string" ? s.materialTitle : "";
+      const materialTitle =
+        typeof s.materialTitle === "string" ? s.materialTitle : "";
       const pagesFrom = s.pagesFrom != null ? Number(s.pagesFrom) : null;
       const pagesTo = s.pagesTo != null ? Number(s.pagesTo) : null;
       const viewModeRaw = typeof s.viewMode === "string" ? s.viewMode : "";
@@ -193,7 +198,9 @@ function ensureSectionShape(list) {
             x: Number.isFinite(Number(n.x)) ? Number(n.x) : 0.1,
             y: Number.isFinite(Number(n.y)) ? Number(n.y) : 0.1,
             text: typeof n.text === "string" ? n.text : "",
-            fontSizePct: Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) : 2.3,
+            fontSizePct: Number.isFinite(Number(n.fontSizePct))
+              ? Number(n.fontSizePct)
+              : 2.3,
             color: n.color === "light" ? "light" : "black",
           })),
         drawings: drawings
@@ -203,7 +210,9 @@ function ensureSectionShape(list) {
             page: Number.isFinite(Number(d.page)) ? Number(d.page) : 1,
             tool: d.tool === "highlighter" ? "highlighter" : "pen",
             color: d.color === "light" ? "light" : "black",
-            sizePct: Number.isFinite(Number(d.sizePct)) ? Number(d.sizePct) : 0.35,
+            sizePct: Number.isFinite(Number(d.sizePct))
+              ? Number(d.sizePct)
+              : 0.35,
             x: Number.isFinite(Number(d.x)) ? Number(d.x) : 0,
             y: Number.isFinite(Number(d.y)) ? Number(d.y) : 0,
             points: Array.isArray(d.points)
@@ -410,6 +419,9 @@ function confirmVideoUrl() {
 
 async function openDocumentModal() {
   documentModalError.value = "";
+  pdfPageCount.value = null;
+  pdfPageCountLoading.value = false;
+  pdfPageCountError.value = "";
   pdfMaterials.value = [];
   pdfMaterialIdDraft.value = "";
   pdfPagesFromDraft.value = "";
@@ -431,10 +443,19 @@ async function openDocumentModal() {
     }
     const data = await r.json();
     const list = Array.isArray(data.materials) ? data.materials : [];
-    pdfMaterials.value = list.filter((m) =>
-      String(m.mimeType || "").toLowerCase().includes("pdf") ||
-      String(m.title || "").toLowerCase().endsWith(".pdf"),
+    pdfMaterials.value = list.filter(
+      (m) =>
+        String(m.mimeType || "")
+          .toLowerCase()
+          .includes("pdf") ||
+        String(m.title || "")
+          .toLowerCase()
+          .endsWith(".pdf"),
     );
+    // Default to first PDF if present so we can show page count.
+    if (pdfMaterials.value.length && !pdfMaterialIdDraft.value) {
+      pdfMaterialIdDraft.value = String(pdfMaterials.value[0].id);
+    }
   } catch {
     documentModalError.value = "Cannot reach the API.";
   }
@@ -444,11 +465,50 @@ function closeDocumentModal() {
   if (!documentModalOpen.value) return;
   documentModalOpen.value = false;
   documentModalError.value = "";
+  pdfPageCount.value = null;
+  pdfPageCountLoading.value = false;
+  pdfPageCountError.value = "";
   pdfMaterialIdDraft.value = "";
   pdfPagesFromDraft.value = "";
   pdfPagesToDraft.value = "";
   pdfMaterials.value = [];
 }
+
+async function loadPdfPageCount() {
+  pdfPageCount.value = null;
+  pdfPageCountError.value = "";
+  const cid = props.courseId;
+  const mid = Number(pdfMaterialIdDraft.value);
+  if (cid == null || !Number.isFinite(mid) || mid <= 0) return;
+  pdfPageCountLoading.value = true;
+  try {
+    const r = await apiFetch(`/api/courses/${cid}/materials/${mid}/download`);
+    if (!r.ok) {
+      pdfPageCountError.value = `Could not load PDF (HTTP ${r.status}).`;
+      return;
+    }
+    const buf = await r.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf, disableWorker: true }).promise;
+    pdfPageCount.value = Number.isFinite(Number(pdf.numPages)) ? Number(pdf.numPages) : null;
+    try {
+      await pdf.destroy?.();
+    } catch {
+      /* ignore */
+    }
+  } catch {
+    pdfPageCountError.value = "Could not read PDF page count.";
+  } finally {
+    pdfPageCountLoading.value = false;
+  }
+}
+
+watch(
+  () => [documentModalOpen.value, props.courseId, pdfMaterialIdDraft.value],
+  ([open]) => {
+    if (!open) return;
+    loadPdfPageCount();
+  },
+);
 
 function confirmDocument() {
   const cid = props.courseId;
@@ -461,12 +521,26 @@ function confirmDocument() {
     documentModalError.value = "Choose a PDF material.";
     return;
   }
+  const pageCount = pdfPageCount.value != null ? Number(pdfPageCount.value) : null;
+  if (pageCount == null) {
+    documentModalError.value = pdfPageCountLoading.value
+      ? "Loading page count…"
+      : pdfPageCountError.value || "Could not determine PDF page count.";
+    return;
+  }
   const fromRaw = pdfPagesFromDraft.value.trim();
   const toRaw = pdfPagesToDraft.value.trim();
   const from = fromRaw ? Number(fromRaw) : null;
   const to = toRaw ? Number(toRaw) : null;
-  if ((from != null && (!Number.isFinite(from) || from <= 0)) || (to != null && (!Number.isFinite(to) || to <= 0))) {
+  if (
+    (from != null && (!Number.isFinite(from) || from <= 0)) ||
+    (to != null && (!Number.isFinite(to) || to <= 0))
+  ) {
     documentModalError.value = "Pages must be positive numbers.";
+    return;
+  }
+  if ((from != null && from > pageCount) || (to != null && to > pageCount)) {
+    documentModalError.value = `Page range must be within 1-${pageCount}.`;
     return;
   }
   if (from != null && to != null && to < from) {
@@ -575,7 +649,7 @@ async function addSelectionToVocabulary(word, meaning) {
   >
     <div
       v-if="videoUrlModalOpen"
-      class="fixed inset-0 z-[103] flex items-center justify-center bg-black/40 p-4"
+      class="fixed inset-0 z-103 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Add video"
@@ -635,7 +709,7 @@ async function addSelectionToVocabulary(word, meaning) {
 
     <div
       v-if="documentModalOpen"
-      class="fixed inset-0 z-[103] flex items-center justify-center bg-black/40 p-4"
+      class="fixed inset-0 z-103 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Add document"
@@ -645,15 +719,20 @@ async function addSelectionToVocabulary(word, meaning) {
         class="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
         @click.stop
       >
-        <h2 class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+        <h2
+          class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+        >
           Add document
         </h2>
         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Choose a PDF from course materials and optionally limit the page range.
+          Choose a PDF from course materials and optionally limit the page
+          range.
         </p>
 
         <div class="mt-4">
-          <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300">PDF material</label>
+          <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >PDF material</label
+          >
           <select
             v-model="pdfMaterialIdDraft"
             class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
@@ -663,14 +742,26 @@ async function addSelectionToVocabulary(word, meaning) {
               {{ m.title || `PDF #${m.id}` }}
             </option>
           </select>
-          <p v-if="!documentModalError && pdfMaterials.length === 0" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          <p v-if="pdfPageCountLoading" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Reading pages…</p>
+          <p v-else-if="pdfPageCountError" class="mt-2 text-sm text-red-600 dark:text-red-400">
+            {{ pdfPageCountError }}
+          </p>
+          <p v-else-if="pdfPageCount != null" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            This PDF has {{ pdfPageCount }} page{{ pdfPageCount === 1 ? "" : "s" }}.
+          </p>
+          <p
+            v-if="!documentModalError && pdfMaterials.length === 0"
+            class="mt-2 text-sm text-zinc-500 dark:text-zinc-400"
+          >
             No PDFs found in this course’s Materials yet.
           </p>
         </div>
 
         <div class="mt-4 grid grid-cols-2 gap-3">
           <div>
-            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Page from</label>
+            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              >Page from</label
+            >
             <input
               v-model="pdfPagesFromDraft"
               type="text"
@@ -681,7 +772,9 @@ async function addSelectionToVocabulary(word, meaning) {
             />
           </div>
           <div>
-            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Page to</label>
+            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              >Page to</label
+            >
             <input
               v-model="pdfPagesToDraft"
               type="text"
@@ -693,7 +786,10 @@ async function addSelectionToVocabulary(word, meaning) {
           </div>
         </div>
 
-        <p v-if="documentModalError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+        <p
+          v-if="documentModalError"
+          class="mt-3 text-sm text-red-600 dark:text-red-400"
+        >
           {{ documentModalError }}
         </p>
 
@@ -707,7 +803,8 @@ async function addSelectionToVocabulary(word, meaning) {
           </button>
           <button
             type="button"
-            class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="pdfPageCountLoading || pdfPageCount == null"
             @click="confirmDocument"
           >
             Add document

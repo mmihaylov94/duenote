@@ -66,8 +66,10 @@ function toYouTubeEmbed(raw) {
     id = url.pathname.replace(/^\//, "") || null;
   } else if (host === "youtube.com" || host === "m.youtube.com") {
     if (url.pathname === "/watch") id = url.searchParams.get("v");
-    else if (url.pathname.startsWith("/embed/")) id = url.pathname.split("/")[2] || null;
-    else if (url.pathname.startsWith("/shorts/")) id = url.pathname.split("/")[2] || null;
+    else if (url.pathname.startsWith("/embed/"))
+      id = url.pathname.split("/")[2] || null;
+    else if (url.pathname.startsWith("/shorts/"))
+      id = url.pathname.split("/")[2] || null;
   }
 
   if (!id) return null;
@@ -76,7 +78,8 @@ function toYouTubeEmbed(raw) {
 
   const start = url.searchParams.get("t") || url.searchParams.get("start");
   const embed = new URL(`https://www.youtube-nocookie.com/embed/${id}`);
-  if (start && /^\d+$/.test(String(start))) embed.searchParams.set("start", String(start));
+  if (start && /^\d+$/.test(String(start)))
+    embed.searchParams.set("start", String(start));
   return embed.toString();
 }
 
@@ -158,7 +161,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="fixed inset-0 z-[102] flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-102 flex items-center justify-center bg-black/40 p-4"
     role="dialog"
     aria-modal="true"
     aria-labelledby="pin-preview-title"
@@ -235,7 +238,7 @@ onUnmounted(() => {
                 </span>
               </p>
               <pre
-                class="whitespace-pre-wrap break-words rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                class="whitespace-pre-wrap wrap-break-word rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                 >{{ section.sourceText || "-" }}</pre
               >
             </div>
@@ -252,7 +255,7 @@ onUnmounted(() => {
                 </span>
               </p>
               <pre
-                class="whitespace-pre-wrap break-words rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                class="whitespace-pre-wrap wrap-break-word rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                 >{{ section.translationText || "-" }}</pre
               >
             </div>
@@ -305,14 +308,27 @@ onUnmounted(() => {
           </div>
 
           <div v-else-if="section.type === 'video'">
-            <div class="overflow-hidden rounded-xl border border-zinc-200 bg-black dark:border-zinc-700">
-              <div v-if="toYouTubeEmbed(section.url)" class="aspect-video w-full">
+            <div
+              class="overflow-hidden rounded-xl border border-zinc-200 bg-black dark:border-zinc-700"
+            >
+              <div
+                v-if="toYouTubeEmbed(section.url)"
+                class="aspect-video w-full"
+              >
                 <iframe
                   class="h-full w-full"
                   :src="toYouTubeEmbed(section.url)"
                   title="YouTube video"
                   frameborder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allow="
+                    accelerometer;
+                    autoplay;
+                    clipboard-write;
+                    encrypted-media;
+                    gyroscope;
+                    picture-in-picture;
+                    web-share;
+                  "
                   referrerpolicy="strict-origin-when-cross-origin"
                   allowfullscreen
                 />

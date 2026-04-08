@@ -32,9 +32,12 @@ async function runSearch(q) {
   error.value = "";
   try {
     const params = new URLSearchParams({ q: trimmed });
-    const r = await apiFetch(`/api/courses/${props.course.id}/search?${params}`, {
-      signal,
-    });
+    const r = await apiFetch(
+      `/api/courses/${props.course.id}/search?${params}`,
+      {
+        signal,
+      },
+    );
     if (!r.ok) {
       error.value = `Search failed (${r.status}).`;
       results.value = [];
@@ -97,7 +100,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="fixed inset-0 z-[101] flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-101 flex items-center justify-center bg-black/40 p-4"
     role="dialog"
     aria-modal="true"
     aria-labelledby="course-search-title"
@@ -125,7 +128,9 @@ onUnmounted(() => {
           <XMarkIcon class="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
-      <div class="shrink-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+      <div
+        class="shrink-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700"
+      >
         <label class="sr-only" for="course-search-input">Search</label>
         <div class="relative">
           <MagnifyingGlassIcon
@@ -151,7 +156,11 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        <p v-if="error" class="px-2 py-2 text-sm text-red-600 dark:text-red-400" role="alert">
+        <p
+          v-if="error"
+          class="px-2 py-2 text-sm text-red-600 dark:text-red-400"
+          role="alert"
+        >
           {{ error }}
         </p>
         <p
@@ -161,13 +170,18 @@ onUnmounted(() => {
           Enter at least 2 characters.
         </p>
         <p
-          v-else-if="!loading && query.trim().length >= 2 && results.length === 0"
+          v-else-if="
+            !loading && query.trim().length >= 2 && results.length === 0
+          "
           class="px-2 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400"
         >
           No sections match.
         </p>
         <ul v-else class="divide-y divide-zinc-100 dark:divide-zinc-800">
-          <li v-for="(row, i) in results" :key="`${row.workbookId}-${row.sectionId}-${i}`">
+          <li
+            v-for="(row, i) in results"
+            :key="`${row.workbookId}-${row.sectionId}-${i}`"
+          >
             <button
               type="button"
               class="flex w-full flex-col gap-1 rounded-lg px-3 py-3 text-left text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -176,14 +190,19 @@ onUnmounted(() => {
               <span class="font-medium text-zinc-900 dark:text-zinc-100">{{
                 row.workbookTitle || "Workbook"
               }}</span>
-              <span class="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{{
-                row.sectionType
+              <span
+                class="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
+                >{{ row.sectionType }}</span
+              >
+              <span class="line-clamp-2 text-zinc-600 dark:text-zinc-300">{{
+                row.snippet
               }}</span>
-              <span class="line-clamp-2 text-zinc-600 dark:text-zinc-300">{{ row.snippet }}</span>
             </button>
           </li>
         </ul>
-        <p v-if="loading" class="px-2 py-4 text-center text-sm text-zinc-500">Searching…</p>
+        <p v-if="loading" class="px-2 py-4 text-center text-sm text-zinc-500">
+          Searching…
+        </p>
       </div>
     </div>
   </div>

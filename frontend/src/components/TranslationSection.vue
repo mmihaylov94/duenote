@@ -161,12 +161,20 @@ async function translateBlock(text, sourceLang, targetLang) {
   return translate(text, sourceLang, targetLang);
 }
 
-async function buildTranslatedBlocks(blocks, prevBlocks, prevTranslated, sourceLang, targetLang) {
+async function buildTranslatedBlocks(
+  blocks,
+  prevBlocks,
+  prevTranslated,
+  sourceLang,
+  targetLang,
+) {
   const prev = prevBlocks;
   const pTr = prevTranslated;
 
   if (!prev || !pTr) {
-    return Promise.all(blocks.map((b) => translateBlock(b, sourceLang, targetLang)));
+    return Promise.all(
+      blocks.map((b) => translateBlock(b, sourceLang, targetLang)),
+    );
   }
 
   if (prev.length === blocks.length) {
@@ -185,7 +193,9 @@ async function buildTranslatedBlocks(blocks, prevBlocks, prevTranslated, sourceL
     return reused;
   }
 
-  return Promise.all(blocks.map((b) => translateBlock(b, sourceLang, targetLang)));
+  return Promise.all(
+    blocks.map((b) => translateBlock(b, sourceLang, targetLang)),
+  );
 }
 
 async function runLeftToRight() {
@@ -306,29 +316,33 @@ function onRightInput(e) {
         {{ error }}
       </p>
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-      <div class="flex min-h-0 flex-col gap-2">
-        <textarea
-          ref="leftTa"
-          v-model="section.sourceText"
-          class="min-h-[7.5rem] w-full resize-none overflow-hidden rounded-md border border-zinc-300 bg-white p-3 font-sans text-base leading-relaxed shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 [field-sizing:content]"
-          placeholder="Type here…"
-          :disabled="loadingSide === 'left'"
-          @input="onLeftInput"
-        />
-        <p v-if="loadingSide === 'left'" class="text-xs text-zinc-500">Translating…</p>
+        <div class="flex min-h-0 flex-col gap-2">
+          <textarea
+            ref="leftTa"
+            v-model="section.sourceText"
+            class="min-h-30 w-full resize-none overflow-hidden rounded-md border border-zinc-300 bg-white p-3 font-sans text-base leading-relaxed shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 field-sizing-content"
+            placeholder="Type here…"
+            :disabled="loadingSide === 'left'"
+            @input="onLeftInput"
+          />
+          <p v-if="loadingSide === 'left'" class="text-xs text-zinc-500">
+            Translating…
+          </p>
+        </div>
+        <div class="flex min-h-0 flex-col gap-2">
+          <textarea
+            ref="rightTa"
+            v-model="section.translationText"
+            class="min-h-30 w-full resize-none overflow-hidden rounded-md border border-zinc-300 bg-white p-3 font-sans text-base leading-relaxed shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 field-sizing-content"
+            placeholder="Translation appears here…"
+            :disabled="loadingSide === 'right'"
+            @input="onRightInput"
+          />
+          <p v-if="loadingSide === 'right'" class="text-xs text-zinc-500">
+            Translating…
+          </p>
+        </div>
       </div>
-      <div class="flex min-h-0 flex-col gap-2">
-        <textarea
-          ref="rightTa"
-          v-model="section.translationText"
-          class="min-h-[7.5rem] w-full resize-none overflow-hidden rounded-md border border-zinc-300 bg-white p-3 font-sans text-base leading-relaxed shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 [field-sizing:content]"
-          placeholder="Translation appears here…"
-          :disabled="loadingSide === 'right'"
-          @input="onRightInput"
-        />
-        <p v-if="loadingSide === 'right'" class="text-xs text-zinc-500">Translating…</p>
-      </div>
-    </div>
     </div>
   </div>
 </template>

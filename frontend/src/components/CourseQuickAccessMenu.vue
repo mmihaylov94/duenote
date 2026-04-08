@@ -284,7 +284,7 @@ function onRenameBlur() {
               </button>
               <div
                 v-show="openItemMenuId === item.id"
-                class="absolute right-0 top-full z-40 mt-0.5 min-w-[9rem] rounded-md border border-zinc-200 bg-white py-0.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                class="absolute right-0 top-full z-40 mt-0.5 min-w-36 rounded-md border border-zinc-200 bg-white py-0.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
                 role="menu"
                 :aria-label="`Actions for ${item.label || 'shortcut'}`"
                 @click.stop

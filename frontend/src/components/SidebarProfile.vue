@@ -40,7 +40,8 @@ const initials = computed(() => {
 const primaryLabel = computed(() => {
   const u = props.user;
   if (!u) return "…";
-  if (u.displayName && String(u.displayName).trim()) return String(u.displayName).trim();
+  if (u.displayName && String(u.displayName).trim())
+    return String(u.displayName).trim();
   return u.email || "Account";
 });
 
@@ -120,7 +121,10 @@ onUnmounted(() => {
             role="menuitem"
             @click="onOpenSettings"
           >
-            <Cog6ToothIcon class="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" />
+            <Cog6ToothIcon
+              class="h-4 w-4 shrink-0 text-zinc-500"
+              aria-hidden="true"
+            />
             Settings
           </button>
           <button
@@ -129,7 +133,10 @@ onUnmounted(() => {
             role="menuitem"
             @click="onSignOut"
           >
-            <ArrowRightOnRectangleIcon class="h-4 w-4 shrink-0" aria-hidden="true" />
+            <ArrowRightOnRectangleIcon
+              class="h-4 w-4 shrink-0"
+              aria-hidden="true"
+            />
             Sign out
           </button>
         </div>
@@ -151,10 +158,16 @@ onUnmounted(() => {
         <span v-else aria-hidden="true">{{ initials }}</span>
       </div>
       <div class="min-w-0 flex-1">
-        <p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100" :title="primaryLabel">
+        <p
+          class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100"
+          :title="primaryLabel"
+        >
           {{ primaryLabel }}
         </p>
-        <p class="truncate text-xs text-zinc-500 dark:text-zinc-400" :title="emailLabel">
+        <p
+          class="truncate text-xs text-zinc-500 dark:text-zinc-400"
+          :title="emailLabel"
+        >
           {{ emailLabel }}
         </p>
       </div>
@@ -171,7 +184,7 @@ onUnmounted(() => {
         </button>
         <div
           v-show="menuOpen"
-          class="absolute bottom-full right-0 z-40 mb-1 min-w-[11rem] rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          class="absolute bottom-full right-0 z-40 mb-1 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
           role="menu"
         >
           <button
@@ -180,7 +193,10 @@ onUnmounted(() => {
             role="menuitem"
             @click="onOpenSettings"
           >
-            <Cog6ToothIcon class="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" />
+            <Cog6ToothIcon
+              class="h-4 w-4 shrink-0 text-zinc-500"
+              aria-hidden="true"
+            />
             Settings
           </button>
           <button
@@ -189,7 +205,10 @@ onUnmounted(() => {
             role="menuitem"
             @click="onSignOut"
           >
-            <ArrowRightOnRectangleIcon class="h-4 w-4 shrink-0" aria-hidden="true" />
+            <ArrowRightOnRectangleIcon
+              class="h-4 w-4 shrink-0"
+              aria-hidden="true"
+            />
             Sign out
           </button>
         </div>

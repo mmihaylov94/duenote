@@ -35,7 +35,8 @@ watch(
   () => [props.open, props.user],
   () => {
     if (!props.open || !props.user) return;
-    displayName.value = props.user.displayName != null ? String(props.user.displayName) : "";
+    displayName.value =
+      props.user.displayName != null ? String(props.user.displayName) : "";
     pendingFile.value = null;
     revokePreview();
     error.value = "";
@@ -176,7 +177,7 @@ async function removePhoto() {
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-110 flex items-center justify-center bg-black/40 p-4"
     role="dialog"
     aria-modal="true"
     aria-labelledby="profile-settings-title"
@@ -214,7 +215,11 @@ async function removePhoto() {
             alt=""
             class="h-full w-full object-cover"
           />
-          <span v-else class="text-sm font-medium text-zinc-500 dark:text-zinc-400">No photo</span>
+          <span
+            v-else
+            class="text-sm font-medium text-zinc-500 dark:text-zinc-400"
+            >No photo</span
+          >
         </div>
         <div class="flex w-full flex-wrap justify-center gap-2">
           <label
@@ -244,7 +249,10 @@ async function removePhoto() {
       </div>
 
       <div class="mt-4">
-        <label for="profile-display-name" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label
+          for="profile-display-name"
+          class="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
           Display name
         </label>
         <input
@@ -290,23 +298,26 @@ async function removePhoto() {
                 ? 'bg-indigo-600'
                 : 'bg-zinc-300 dark:bg-zinc-600'
             "
-            @click="
-              setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')
-            "
+            @click="setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')"
           >
             <span class="sr-only">Toggle dark mode</span>
             <span
               class="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
-              :class="colorScheme === 'dark' ? 'translate-x-4' : 'translate-x-0'"
+              :class="
+                colorScheme === 'dark' ? 'translate-x-4' : 'translate-x-0'
+              "
             />
           </button>
         </div>
       </div>
 
       <div class="mt-6 border-t border-zinc-200 pt-5 dark:border-zinc-700">
-        <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Danger zone</p>
+        <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          Danger zone
+        </p>
         <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-          Permanently delete your account and all your courses, workbooks, and vocabulary.
+          Permanently delete your account and all your courses, workbooks, and
+          vocabulary.
         </p>
         <div class="mt-3 flex justify-end">
           <button
@@ -341,7 +352,7 @@ async function removePhoto() {
 
   <div
     v-if="deleteModalOpen"
-    class="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4"
+    class="fixed inset-0 z-120 flex items-center justify-center bg-black/50 p-4"
     role="dialog"
     aria-modal="true"
     aria-labelledby="delete-account-title"
@@ -351,11 +362,15 @@ async function removePhoto() {
       class="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
       @click.stop
     >
-      <h3 id="delete-account-title" class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+      <h3
+        id="delete-account-title"
+        class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+      >
         Delete account?
       </h3>
       <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-        This will permanently delete your account and all related data (courses, workbooks, vocabulary, pins, and uploads). This cannot be undone.
+        This will permanently delete your account and all related data (courses,
+        workbooks, vocabulary, pins, and uploads). This cannot be undone.
       </p>
 
       <p
