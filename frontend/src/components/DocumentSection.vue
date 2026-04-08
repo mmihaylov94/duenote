@@ -6,9 +6,14 @@ import iro from "@jaames/iro";
 import { Pencil as LucidePencil, Highlighter as LucideHighlighter, Eraser as LucideEraser } from "lucide-vue-next";
 
 import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker?url";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+let sharedPdfWorker = null;
+function ensurePdfWorker() {
+  if (sharedPdfWorker) return;
+  sharedPdfWorker = new Worker(pdfWorkerUrl, { type: "module" });
+  pdfjsLib.GlobalWorkerOptions.workerPort = sharedPdfWorker;
+}
 
 const props = defineProps({
   courseId: { type: Number, default: null },
@@ -1018,6 +1023,7 @@ async function render() {
 
   loading.value = true;
   try {
+    ensurePdfWorker();
     const r = await apiFetch(`/api/courses/${cid}/materials/${materialId}/download`);
     if (!r.ok) {
       error.value = `Could not load PDF (HTTP ${r.status}).`;
