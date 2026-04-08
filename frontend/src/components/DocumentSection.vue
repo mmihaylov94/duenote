@@ -2,6 +2,8 @@
 import { ref, watch, computed, onUnmounted, onMounted, nextTick } from "vue";
 import { apiFetch } from "../api/client.js";
 // Custom icons used for page view toggle.
+import iro from "@jaames/iro";
+import { Pencil as LucidePencil, Highlighter as LucideHighlighter, Eraser as LucideEraser } from "lucide-vue-next";
 
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker?url";
@@ -22,7 +24,59 @@ const renderedPages = ref([]);
 const selectedNoteId = ref(null);
 /** Note currently being edited (text mode) */
 const editingNoteId = ref(null);
+/** Selected drawing (move mode) */
+const selectedDrawingId = ref(null);
 const annotateEnabled = ref(false);
+/** @type {import('vue').Ref<'off'|'pen'|'highlighter'|'eraser'>} */
+const pencilTool = ref("off");
+const pencilColor = ref("#0a0a0a"); // default for new strokes
+const pencilSizePct = ref(0.35); // default for new strokes; percent of page width
+const drawingInProgress = ref(false);
+const activeStrokeId = ref(null);
+const drawingDrag = ref(null);
+const erasingInProgress = ref(false);
+const colorPickerOpen = ref(false);
+const colorPickerTarget = ref(null); // 'pencil' | 'selected'
+const colorPickerEl = ref(null);
+const colorPickerPos = ref({ top: 0, left: 0 });
+const colorPickerPlacement = ref("bottom"); // bottom | top
+let iroPicker = null;
+
+function getPageElByNumber(pageNumber) {
+  const p = Number(pageNumber);
+  if (!Number.isFinite(p)) return null;
+  return pageEls.get(p) || null;
+}
+
+function setPencilTool(next) {
+  pencilTool.value = next;
+  // When switching tools, exit any text editing state.
+  editingNoteId.value = null;
+  if (next !== "off") {
+    annotateEnabled.value = false;
+  }
+}
+
+function togglePencilEnabled() {
+  if (pencilTool.value === "off") setPencilTool("pen");
+  else setPencilTool("off");
+}
+
+function toggleAnnotations() {
+  annotateEnabled.value = !annotateEnabled.value;
+  if (annotateEnabled.value) {
+    // Switching to annotations disables pencil mode.
+    pencilTool.value = "off";
+  }
+}
+
+function applyPencilDefaultsFromSelected() {
+  const d = selectedDrawing();
+  if (!d) return;
+  if (d.color === "light" || d.color === "black") pencilColor.value = d.color;
+  if (Number.isFinite(Number(d.sizePct))) pencilSizePct.value = Number(d.sizePct);
+  if (d.tool === "pen" || d.tool === "highlighter") pencilTool.value = d.tool;
+}
 
 /** @type {Map<string, HTMLInputElement>} */
 const noteInputEls = new Map();
@@ -118,6 +172,7 @@ let cancelled = false;
 
 const hasPdf = computed(() => Number.isFinite(Number(section.value?.materialId)));
 const notes = computed(() => (Array.isArray(section.value?.notes) ? section.value.notes : []));
+const drawings = computed(() => (Array.isArray(section.value?.drawings) ? section.value.drawings : []));
 const docTitle = computed(() => {
   const t = typeof section.value?.materialTitle === "string" ? section.value.materialTitle.trim() : "";
   const id = section.value?.materialId;
@@ -234,6 +289,10 @@ function ensureNotesArray() {
   if (!Array.isArray(section.value.notes)) section.value.notes = [];
 }
 
+function ensureDrawingsArray() {
+  if (!Array.isArray(section.value.drawings)) section.value.drawings = [];
+}
+
 function clamp01(v, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
@@ -265,6 +324,422 @@ function removeNote(id) {
   section.value.notes = section.value.notes.filter((n) => n.id !== id);
   if (selectedNoteId.value === id) selectedNoteId.value = null;
   if (editingNoteId.value === id) editingNoteId.value = null;
+}
+
+function selectedDrawing() {
+  const id = selectedDrawingId.value;
+  if (!id) return null;
+  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  return list.find((d) => d?.id === id) || null;
+}
+
+function removeDrawing(id) {
+  ensureDrawingsArray();
+  section.value.drawings = section.value.drawings.filter((d) => d.id !== id);
+  if (selectedDrawingId.value === id) selectedDrawingId.value = null;
+}
+
+function drawingStyle(d) {
+  const sizePct = Number.isFinite(Number(d?.sizePct)) ? Number(d.sizePct) : 0.35;
+  const colorRaw = d?.color;
+  const color =
+    colorRaw === "light"
+      ? "rgb(244 244 245)"
+      : colorRaw === "black"
+        ? "rgb(9 9 11)"
+        : typeof colorRaw === "string" && colorRaw.trim()
+          ? colorRaw
+          : "rgb(9 9 11)";
+  const opacity = d?.tool === "highlighter" ? 0.35 : 1;
+  return {
+    stroke: color,
+    opacity,
+    strokeWidth: `clamp(1px, calc(var(--page-w, 700px) * ${sizePct / 100}), 24px)`,
+  };
+}
+
+function togglePencilColor() {
+  if (selectedKind.value === "drawing") {
+    const d = selectedDrawing();
+    if (!d) return;
+    if (d.color === "light" || d.color === "black") {
+      d.color = d.color === "light" ? "black" : "light";
+      pencilColor.value = d.color === "light" ? "#f4f4f5" : "#0a0a0a";
+    } else {
+      const cur = typeof d.color === "string" && d.color ? d.color : "#0a0a0a";
+      d.color = cur.toLowerCase() === "#f4f4f5" ? "#0a0a0a" : "#f4f4f5";
+      pencilColor.value = d.color;
+    }
+    return;
+  }
+  pencilColor.value = String(pencilColor.value || "#0a0a0a").toLowerCase() === "#f4f4f5" ? "#0a0a0a" : "#f4f4f5";
+}
+
+function changePencilThickness(delta) {
+  const step = 0.06;
+  if (selectedKind.value === "drawing") {
+    const d = selectedDrawing();
+    if (!d) return;
+    const cur = Number.isFinite(Number(d.sizePct)) ? Number(d.sizePct) : pencilSizePct.value;
+    const next = Math.max(0.15, Math.min(1.2, cur + delta * step));
+    d.sizePct = next;
+    pencilSizePct.value = next;
+    return;
+  }
+  pencilSizePct.value = Math.max(0.15, Math.min(1.2, pencilSizePct.value + delta * step));
+}
+
+function colorForSelectedKind() {
+  if (selectedKind.value === "note") {
+    const n = selectedNote();
+    if (!n) return "#0a0a0a";
+    if (n.color === "light") return "#f4f4f5";
+    if (n.color === "black") return "#0a0a0a";
+    return typeof n.color === "string" && n.color ? n.color : "#0a0a0a";
+  }
+  if (selectedKind.value === "drawing") {
+    const d = selectedDrawing();
+    if (!d) return "#0a0a0a";
+    if (d.color === "light") return "#f4f4f5";
+    if (d.color === "black") return "#0a0a0a";
+    return typeof d.color === "string" && d.color ? d.color : "#0a0a0a";
+  }
+  return "#0a0a0a";
+}
+
+function setColorForSelectedKind(hex) {
+  if (!hex) return;
+  if (selectedKind.value === "note") {
+    const n = selectedNote();
+    if (!n) return;
+    n.color = hex;
+  } else if (selectedKind.value === "drawing") {
+    const d = selectedDrawing();
+    if (!d) return;
+    d.color = hex;
+    pencilColor.value = hex;
+  }
+}
+
+function noteTextColor(n) {
+  const c = n?.color;
+  if (c === "light") return "rgb(244 244 245)";
+  if (c === "black") return "rgb(9 9 11)";
+  if (typeof c === "string" && c.trim()) return c;
+  return "rgb(9 9 11)";
+}
+
+function openColorPicker(target, e) {
+  colorPickerTarget.value = target; // 'pencil' | 'selected'
+  colorPickerOpen.value = true;
+  if (e?.currentTarget instanceof Element) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const popW = 220;
+    const popH = 250;
+    const margin = 8;
+    let left = Math.min(window.innerWidth - popW - margin, Math.max(margin, r.left));
+    let top = r.bottom + margin;
+    let placement = "bottom";
+    if (top + popH > window.innerHeight - margin) {
+      top = Math.max(margin, r.top - popH - margin);
+      placement = "top";
+    }
+    colorPickerPos.value = { top, left };
+    colorPickerPlacement.value = placement;
+  }
+  nextTick(() => {
+    if (!colorPickerEl.value) return;
+    const initial = target === "pencil" ? pencilColor.value : colorForSelectedKind();
+    // The popover container is created/destroyed by Vue (v-if), so we must
+    // (re)mount the picker into the current element every time.
+    try {
+      iroPicker?.off?.();
+    } catch {
+      /* ignore */
+    }
+    iroPicker = null;
+    try {
+      colorPickerEl.value.innerHTML = "";
+    } catch {
+      /* ignore */
+    }
+
+    iroPicker = new iro.ColorPicker(colorPickerEl.value, {
+      width: 200,
+      color: initial,
+      layout: [
+        { component: iro.ui.Wheel },
+        { component: iro.ui.Slider, options: { sliderType: "value" } },
+      ],
+    });
+    iroPicker.on("color:change", (c) => {
+      const hex = c?.hexString || "#0a0a0a";
+      if (colorPickerTarget.value === "pencil") {
+        pencilColor.value = hex;
+        // If a drawing is selected, treat pencil color as editing it.
+        if (selectedDrawingId.value) setColorForSelectedKind(hex);
+      } else {
+        setColorForSelectedKind(hex);
+      }
+    });
+  });
+}
+
+function closeColorPicker() {
+  colorPickerOpen.value = false;
+  colorPickerTarget.value = null;
+}
+
+function onGlobalPointerDownForColorPicker(e) {
+  if (!colorPickerOpen.value) return;
+  if (e.target instanceof Element && e.target.closest?.("[data-color-picker-root]")) return;
+  closeColorPicker();
+}
+
+function drawingPathD(d) {
+  const pts = Array.isArray(d?.points) ? d.points : [];
+  if (!pts.length) return "";
+  const ox = Number.isFinite(Number(d?.x)) ? Number(d.x) : 0;
+  const oy = Number.isFinite(Number(d?.y)) ? Number(d.y) : 0;
+  const scale = 1000;
+  const p0 = pts[0];
+  let out = `M ${(clamp01(p0.x + ox, 0) * scale).toFixed(2)} ${(clamp01(p0.y + oy, 0) * scale).toFixed(2)}`;
+  for (let i = 1; i < pts.length; i += 1) {
+    const p = pts[i];
+    out += ` L ${(clamp01(p.x + ox, 0) * scale).toFixed(2)} ${(clamp01(p.y + oy, 0) * scale).toFixed(2)}`;
+  }
+  return out;
+}
+
+const selectedKind = computed(() => {
+  if (selectedNoteId.value) return "note";
+  if (selectedDrawingId.value) return "drawing";
+  return null;
+});
+
+function clearSelection() {
+  selectedNoteId.value = null;
+  editingNoteId.value = null;
+  selectedDrawingId.value = null;
+}
+
+function pagePointFromEvent(pageNumber, e, preferCurrentTarget = false) {
+  const targetEl =
+    preferCurrentTarget && e?.currentTarget instanceof Element ? e.currentTarget : getPageElByNumber(pageNumber);
+  const box = targetEl?.getBoundingClientRect?.();
+  if (!box || !box.width || !box.height) return null;
+  const x = (e.clientX - box.left) / box.width;
+  const y = (e.clientY - box.top) / box.height;
+  return { x: clamp01(x, 0), y: clamp01(y, 0), box };
+}
+
+function maybeAppendPoint(stroke, pt) {
+  const pts = stroke.points;
+  const last = pts[pts.length - 1];
+  if (!last) {
+    pts.push(pt);
+    return;
+  }
+  const dx = pt.x - last.x;
+  const dy = pt.y - last.y;
+  if (dx * dx + dy * dy < 0.000004) return; // ~0.2% of page
+  pts.push(pt);
+}
+
+function beginStroke(pageNumber, tool, e) {
+  if (pencilTool.value === "off") return;
+  ensureDrawingsArray();
+  const p = pagePointFromEvent(pageNumber, e, true);
+  if (!p) return;
+  try {
+    e.currentTarget?.setPointerCapture?.(e.pointerId);
+  } catch {
+    /* ignore */
+  }
+  const id = crypto.randomUUID();
+  const baseSizePct = Number.isFinite(Number(pencilSizePct.value)) ? Number(pencilSizePct.value) : 0.35;
+  const stroke = {
+    id,
+    page: pageNumber,
+    tool,
+    color: String(pencilColor.value || "#0a0a0a"),
+    sizePct: baseSizePct,
+    x: 0,
+    y: 0,
+    points: [{ x: p.x, y: p.y }],
+  };
+  section.value.drawings.push(stroke);
+  activeStrokeId.value = id;
+  drawingInProgress.value = true;
+  selectedDrawingId.value = id;
+  selectedNoteId.value = null;
+  editingNoteId.value = null;
+  e.preventDefault();
+}
+
+function updateStroke(pageNumber, e) {
+  const id = activeStrokeId.value;
+  if (!drawingInProgress.value || !id) return;
+  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const stroke = list.find((d) => d?.id === id);
+  if (!stroke) return;
+  const p = pagePointFromEvent(pageNumber, e, true);
+  if (!p) return;
+  maybeAppendPoint(stroke, { x: p.x, y: p.y });
+  e.preventDefault();
+}
+
+function endStroke() {
+  if (!drawingInProgress.value) return;
+  const id = activeStrokeId.value;
+  drawingInProgress.value = false;
+  activeStrokeId.value = null;
+  if (!id) return;
+  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const stroke = list.find((d) => d?.id === id);
+  const ptsLen = stroke?.points?.length ?? 0;
+  if (ptsLen < 2) removeDrawing(id);
+  suppressSyntheticClickOnce();
+}
+
+function beginErase(pageNumber, e) {
+  if (pencilTool.value !== "eraser") return;
+  erasingInProgress.value = true;
+  eraseAt(pageNumber, e);
+}
+
+function updateErase(pageNumber, e) {
+  if (!erasingInProgress.value) return;
+  eraseAt(pageNumber, e);
+}
+
+function endErase() {
+  if (!erasingInProgress.value) return;
+  erasingInProgress.value = false;
+  suppressSyntheticClickOnce();
+}
+
+function eraseAt(pageNumber, e) {
+  ensureDrawingsArray();
+  const p = pagePointFromEvent(pageNumber, e, true);
+  if (!p) return;
+  const threshPx = 14;
+  const thresh = threshPx / p.box.width;
+  const thresh2 = thresh * thresh;
+  const page = Number(pageNumber);
+  section.value.drawings = section.value.drawings.filter((d) => {
+    if (Number(d.page) !== page) return true;
+    const pts = Array.isArray(d.points) ? d.points : [];
+    const ox = Number.isFinite(Number(d.x)) ? Number(d.x) : 0;
+    const oy = Number.isFinite(Number(d.y)) ? Number(d.y) : 0;
+    for (const pt of pts) {
+      const dx = (pt.x + ox) - p.x;
+      const dy = (pt.y + oy) - p.y;
+      if (dx * dx + dy * dy <= thresh2) return false;
+    }
+    return true;
+  });
+  if (selectedDrawingId.value && !section.value.drawings.some((d) => d.id === selectedDrawingId.value)) {
+    selectedDrawingId.value = null;
+  }
+  e.preventDefault();
+}
+
+function beginDrawingDragCandidate(pageNumber, drawing, e) {
+  // Allow moving drawings both in annotation mode and while pencil is enabled.
+  if (!drawing?.id) return;
+  if (drawingInProgress.value) return;
+  if (editingNoteId.value) return;
+  const pageEl = getPageElByNumber(pageNumber);
+  const box = pageEl?.getBoundingClientRect?.();
+  if (!box || !box.width || !box.height) return;
+  selectedDrawingId.value = drawing.id;
+  selectedNoteId.value = null;
+  applyPencilDefaultsFromSelected();
+  drawingDrag.value = {
+    page: pageNumber,
+    id: drawing.id,
+    box,
+    startClientX: e.clientX,
+    startClientY: e.clientY,
+    startX: Number.isFinite(Number(drawing.x)) ? Number(drawing.x) : 0,
+    startY: Number.isFinite(Number(drawing.y)) ? Number(drawing.y) : 0,
+    moved: false,
+  };
+  try {
+    e.currentTarget?.setPointerCapture?.(e.pointerId);
+  } catch {
+    /* ignore */
+  }
+  window.addEventListener("pointermove", onDrawingDragMove, true);
+  window.addEventListener("pointerup", endDrawingDrag, true);
+  window.addEventListener("pointercancel", endDrawingDrag, true);
+}
+
+function clampDrawingOffset(stroke, nextX, nextY) {
+  const pts = Array.isArray(stroke?.points) ? stroke.points : [];
+  if (!pts.length) return { x: nextX, y: nextY };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of pts) {
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return { x: nextX, y: nextY };
+  }
+  const loX = -minX;
+  const hiX = 1 - maxX;
+  const loY = -minY;
+  const hiY = 1 - maxY;
+  return {
+    x: Math.max(loX, Math.min(hiX, nextX)),
+    y: Math.max(loY, Math.min(hiY, nextY)),
+  };
+}
+
+function onDrawingDragMove(e) {
+  const d = drawingDrag.value;
+  if (!d) return;
+  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const stroke = list.find((x) => x?.id === d.id);
+  if (!stroke) return;
+  const dxPx = e.clientX - d.startClientX;
+  const dyPx = e.clientY - d.startClientY;
+  const dist2 = dxPx * dxPx + dyPx * dyPx;
+  if (!d.moved && dist2 < 16) return;
+  if (!d.moved) {
+    d.moved = true;
+    try {
+      document.activeElement?.blur?.();
+    } catch {
+      /* ignore */
+    }
+  }
+  const dx = dxPx / d.box.width;
+  const dy = dyPx / d.box.height;
+  const nextX = (Number.isFinite(Number(d.startX)) ? Number(d.startX) : 0) + dx;
+  const nextY = (Number.isFinite(Number(d.startY)) ? Number(d.startY) : 0) + dy;
+  const clamped = clampDrawingOffset(stroke, nextX, nextY);
+  stroke.x = clamped.x;
+  stroke.y = clamped.y;
+  e.preventDefault();
+}
+
+function endDrawingDrag() {
+  const moved = Boolean(drawingDrag.value?.moved);
+  drawingDrag.value = null;
+  window.removeEventListener("pointermove", onDrawingDragMove, true);
+  window.removeEventListener("pointerup", endDrawingDrag, true);
+  window.removeEventListener("pointercancel", endDrawingDrag, true);
+  if (moved) suppressSyntheticClickOnce();
 }
 
 function beginNoteDragCandidate(e, note) {
@@ -376,30 +851,43 @@ function selectedNote() {
 }
 
 function toggleSelectedColor() {
-  const n = selectedNote();
-  if (!n) return;
-  n.color = n.color === "light" ? "black" : "light";
+  if (selectedKind.value === "note") {
+    const n = selectedNote();
+    if (!n) return;
+    n.color = n.color === "light" ? "black" : "light";
+  } else if (selectedKind.value === "drawing") {
+    const d = selectedDrawing();
+    if (!d) return;
+    d.color = d.color === "light" ? "black" : "light";
+  }
 }
 
-function changeSelectedFontSize(delta) {
-  const n = selectedNote();
-  if (!n) return;
-  const cur = Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) : 2.3;
-  // delta is in "steps" – translate to percentage points.
-  // 0.15% is a small, controllable increment.
-  const next = cur + delta * 0.15;
-  n.fontSizePct = Math.max(1.0, Math.min(4.0, next));
+function changeSelectedSize(delta) {
+  if (selectedKind.value === "note") {
+    const n = selectedNote();
+    if (!n) return;
+    const cur = Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) : 2.3;
+    const next = cur + delta * 0.15;
+    n.fontSizePct = Math.max(1.0, Math.min(4.0, next));
+  } else if (selectedKind.value === "drawing") {
+    const d = selectedDrawing();
+    if (!d) return;
+    const cur = Number.isFinite(Number(d.sizePct)) ? Number(d.sizePct) : 0.35;
+    const next = cur + delta * 0.06;
+    d.sizePct = Math.max(0.15, Math.min(1.2, next));
+  }
 }
 
 function onPageClick(e, pageNumber) {
   if (!annotateEnabled.value) return;
+  if (pencilTool.value !== "off") return;
   // Do not add a new note when clicking an existing note.
   if (e.target instanceof HTMLElement && e.target.closest?.("[data-note]")) return;
+  if (e.target instanceof HTMLElement && e.target.closest?.("[data-stroke]")) return;
   // If a note is currently selected/being edited, a click on the page should
   // only unfocus (exit editing) and NOT create a new note.
-  if (selectedNoteId.value || editingNoteId.value) {
-    selectedNoteId.value = null;
-    editingNoteId.value = null;
+  if (selectedNoteId.value || editingNoteId.value || selectedDrawingId.value) {
+    clearSelection();
     return;
   }
   const box = e.currentTarget?.getBoundingClientRect?.();
@@ -471,6 +959,15 @@ function onKeydown(e) {
     removeNote(selectedNoteId.value);
     return;
   }
+  if (
+    annotateEnabled.value &&
+    selectedDrawingId.value &&
+    (e.key === "Delete" || e.key === "Backspace")
+  ) {
+    e.preventDefault();
+    removeDrawing(selectedDrawingId.value);
+    return;
+  }
   if (!canHandleGlobalKeys()) return;
   if (e.key === "ArrowRight") {
     e.preventDefault();
@@ -483,6 +980,7 @@ function onKeydown(e) {
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
+  window.addEventListener("pointerdown", onGlobalPointerDownForColorPicker, true);
 });
 
 function pageRangeToRender(total) {
@@ -591,6 +1089,7 @@ watch(
 onUnmounted(async () => {
   cancelled = true;
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("pointerdown", onGlobalPointerDownForColorPicker, true);
   if (wheelCooldownId != null) window.clearTimeout(wheelCooldownId);
   wheelCooldownId = null;
   if (scrollCooldownId != null) window.clearTimeout(scrollCooldownId);
@@ -679,12 +1178,114 @@ onUnmounted(async () => {
           "
           :title="annotateEnabled ? 'Disable text notes' : 'Enable text notes'"
           :aria-label="annotateEnabled ? 'Disable text notes' : 'Enable text notes'"
-          @click="annotateEnabled = !annotateEnabled"
+          @click="toggleAnnotations"
         >
           A
         </button>
+        <button
+          type="button"
+          class="flex h-7 w-7 items-center justify-center rounded-md border shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          :class="
+            pencilTool !== 'off'
+              ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-950/70'
+              : 'border-zinc-300 bg-white text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200'
+          "
+          :title="pencilTool !== 'off' ? 'Disable pencil' : 'Enable pencil'"
+          :aria-label="pencilTool !== 'off' ? 'Disable pencil' : 'Enable pencil'"
+          @click="togglePencilEnabled"
+        >
+          <svg
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z" />
+          </svg>
+        </button>
+
+        <!-- Pencil menu (right side, like annotations controls) -->
         <div
-          v-if="annotateEnabled && selectedNoteId"
+          v-if="pencilTool !== 'off'"
+          class="ml-1 flex items-center gap-1 rounded-md border border-zinc-200 bg-white p-0.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+          role="group"
+          aria-label="Pencil tools"
+        >
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            :class="pencilTool === 'pen' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200' : ''"
+            title="Pen"
+            aria-label="Pen"
+            @click="setPencilTool('pen')"
+          >
+            <LucidePencil class="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            :class="
+              pencilTool === 'highlighter'
+                ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                : ''
+            "
+            title="Highlighter"
+            aria-label="Highlighter"
+            @click="setPencilTool('highlighter')"
+          >
+            <LucideHighlighter class="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            :class="
+              pencilTool === 'eraser' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200' : ''
+            "
+            title="Eraser"
+            aria-label="Eraser"
+            @click="setPencilTool('eraser')"
+          >
+            <LucideEraser class="h-4 w-4" aria-hidden="true" />
+          </button>
+          <div class="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-700" />
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            title="Choose color"
+            aria-label="Choose color"
+            @click="openColorPicker(selectedDrawingId ? 'selected' : 'pencil', $event)"
+          >
+            <span
+              class="h-3 w-3 rounded-sm border border-zinc-300"
+              :style="{ backgroundColor: pencilColor }"
+            />
+          </button>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            title="Thinner"
+            aria-label="Thinner"
+            @click="changePencilThickness(-1)"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            title="Thicker"
+            aria-label="Thicker"
+            @click="changePencilThickness(1)"
+          >
+            +
+          </button>
+        </div>
+        <div
+          v-if="annotateEnabled && selectedKind"
           class="ml-1 flex items-center gap-1 rounded-md border border-zinc-200 bg-white p-0.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
           role="group"
           aria-label="Text formatting"
@@ -694,20 +1295,20 @@ onUnmounted(async () => {
             class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
             title="Delete text box"
             aria-label="Delete text box"
-            @click="removeNote(selectedNoteId)"
+            @click="selectedKind === 'note' ? removeNote(selectedNoteId) : removeDrawing(selectedDrawingId)"
           >
             ×
           </button>
           <button
             type="button"
             class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            :title="selectedNote()?.color === 'light' ? 'Switch to black text' : 'Switch to light text'"
-            :aria-label="selectedNote()?.color === 'light' ? 'Switch to black text' : 'Switch to light text'"
-            @click="toggleSelectedColor"
+            title="Choose color"
+            aria-label="Choose color"
+            @click="openColorPicker('selected', $event)"
           >
             <span
               class="h-3 w-3 rounded-sm border border-zinc-300"
-              :class="selectedNote()?.color === 'light' ? 'bg-zinc-100' : 'bg-zinc-900'"
+              :style="{ backgroundColor: colorForSelectedKind() }"
             />
           </button>
           <button
@@ -715,7 +1316,7 @@ onUnmounted(async () => {
             class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
             title="Smaller"
             aria-label="Smaller"
-            @click="changeSelectedFontSize(-1)"
+            @click="changeSelectedSize(-1)"
           >
             −
           </button>
@@ -724,7 +1325,7 @@ onUnmounted(async () => {
             class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
             title="Larger"
             aria-label="Larger"
-            @click="changeSelectedFontSize(1)"
+            @click="changeSelectedSize(1)"
           >
             +
           </button>
@@ -738,6 +1339,26 @@ onUnmounted(async () => {
 
     <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     <p v-else-if="loading" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+
+    <div
+      v-if="colorPickerOpen"
+      data-color-picker-root
+      class="fixed z-50 w-[220px] rounded-md border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+      :style="{ top: colorPickerPos.top + 'px', left: colorPickerPos.left + 'px' }"
+      @pointerdown.stop
+    >
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-xs font-medium text-zinc-600 dark:text-zinc-300">Color</p>
+        <button
+          type="button"
+          class="rounded px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          @click="closeColorPicker"
+        >
+          Close
+        </button>
+      </div>
+      <div ref="colorPickerEl" class="mt-2" />
+    </div>
 
     <div v-if="renderedPages.length" class="mt-4 min-h-0 flex-1">
       <div
@@ -757,56 +1378,139 @@ onUnmounted(async () => {
         >
           <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
 
-        <div
-          v-for="n in notes.filter((x) => Number(x.page) === p.page)"
-          :key="n.id"
-          class="absolute"
-          :style="noteStyle(n)"
-        >
-          <div
-            class="pointer-events-auto"
-            data-note
-            @pointerdown.stop
-            @click.stop
-            style="touch-action: none"
+          <svg
+            class="absolute inset-0"
+            viewBox="0 0 1000 1000"
+            preserveAspectRatio="none"
+            :style="{ pointerEvents: annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none' }"
+            @pointerdown.stop.prevent="
+              (e) => {
+                if (pencilTool === 'pen' || pencilTool === 'highlighter') beginStroke(p.page, pencilTool, e);
+                else if (pencilTool === 'eraser') beginErase(p.page, e);
+              }
+            "
+            @pointermove.stop.prevent="
+              (e) => {
+                if (pencilTool === 'pen' || pencilTool === 'highlighter') updateStroke(p.page, e);
+                else if (pencilTool === 'eraser') updateErase(p.page, e);
+              }
+            "
+            @pointerup.stop.prevent="
+              () => {
+                endStroke();
+                endErase();
+              }
+            "
+            @pointercancel.stop.prevent="
+              () => {
+                endStroke();
+                endErase();
+              }
+            "
           >
-            <textarea
-              v-model="n.text"
-              rows="1"
-              class="w-full resize-none overflow-hidden whitespace-pre-wrap border border-dashed border-zinc-400 bg-transparent px-1.5 py-0.5 text-zinc-900 outline-none dark:border-zinc-500"
-              :readonly="editingNoteId !== n.id"
-              :class="
-                (selectedNoteId === n.id ? 'ring-1 ring-indigo-500 ' : '') +
-                (editingNoteId === n.id ? 'cursor-text ' : 'cursor-move ')
-              "
-              :style="{
-                fontSize: `clamp(10px, calc(var(--page-w, 700px) * ${
-                  Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) / 100 : 0.023
-                }), 28px)`,
-                color: n.color === 'light' ? 'rgb(244 244 245)' : 'rgb(9 9 11)',
-              }"
-              placeholder="Type…"
-              :ref="(el) => setNoteInputEl(n.id, el)"
-              @pointerdown.capture="beginNoteDragCandidate($event, n)"
-              @pointerdown.stop="
-                annotateEnabled = true;
-                selectedNoteId = n.id;
-              "
-              @click.stop="
-                annotateEnabled = true;
-                selectedNoteId = n.id;
-                editingNoteId = n.id;
-              "
-              @focus="
-                annotateEnabled = true;
-                selectedNoteId = n.id;
-              "
-              @input="autosizeTextarea($event.target)"
-              @keydown.enter.stop
-              @blur="onNoteBlur(n)"
-            ></textarea>
+            <g v-for="d in drawings.filter((x) => Number(x.page) === p.page)" :key="d.id">
+              <path
+                v-if="selectedDrawingId === d.id"
+                :d="drawingPathD(d)"
+                fill="none"
+                stroke="rgb(99 102 241)"
+                :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 2px)`, opacity: 0.6 }"
+                vector-effect="non-scaling-stroke"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                pointer-events="none"
+              />
+              <!-- Wide invisible hit area for easier selection/drag -->
+              <path
+                :d="drawingPathD(d)"
+                fill="none"
+                stroke="transparent"
+                :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 12px)` }"
+                vector-effect="non-scaling-stroke"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                pointer-events="stroke"
+                @pointerdown.stop.prevent="
+                  (e) => {
+                    if (pencilTool === 'eraser') beginErase(p.page, e);
+                    else beginDrawingDragCandidate(p.page, d, e);
+                  }
+                "
+              />
+              <path
+                :d="drawingPathD(d)"
+                fill="none"
+                :style="drawingStyle(d)"
+                vector-effect="non-scaling-stroke"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                data-stroke
+                @pointerdown.stop.prevent="
+                  (e) => {
+                    if (pencilTool === 'eraser') beginErase(p.page, e);
+                    else beginDrawingDragCandidate(p.page, d, e);
+                  }
+                "
+              />
+            </g>
+          </svg>
+
+          <div
+            v-for="n in notes.filter((x) => Number(x.page) === p.page)"
+            :key="n.id"
+            class="absolute"
+            :style="noteStyle(n)"
+          >
+            <div
+              class="pointer-events-auto"
+              data-note
+              @pointerdown.stop
+              @click.stop
+              style="touch-action: none"
+            >
+              <textarea
+                v-model="n.text"
+                rows="1"
+                class="w-full resize-none overflow-hidden whitespace-pre-wrap border border-dashed border-zinc-400 bg-transparent px-1.5 py-0.5 text-zinc-900 outline-none dark:border-zinc-500"
+                :readonly="editingNoteId !== n.id"
+                :class="
+                  (selectedNoteId === n.id ? 'ring-1 ring-indigo-500 ' : '') +
+                  (editingNoteId === n.id ? 'cursor-text ' : 'cursor-move ')
+                "
+                :style="{
+                  fontSize: `clamp(10px, calc(var(--page-w, 700px) * ${
+                    Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) / 100 : 0.023
+                  }), 28px)`,
+                  color: noteTextColor(n),
+                }"
+                placeholder="Type…"
+                :ref="(el) => setNoteInputEl(n.id, el)"
+                @pointerdown.capture="beginNoteDragCandidate($event, n)"
+                @pointerdown.stop="
+                  if (pencilTool !== 'off') pencilTool = 'off';
+                  annotateEnabled = true;
+                  selectedNoteId = n.id;
+                  selectedDrawingId = null;
+                "
+                @click.stop="
+                  if (pencilTool !== 'off') pencilTool = 'off';
+                  annotateEnabled = true;
+                  selectedNoteId = n.id;
+                  selectedDrawingId = null;
+                  editingNoteId = n.id;
+                "
+                @focus="
+                  if (pencilTool !== 'off') pencilTool = 'off';
+                  annotateEnabled = true;
+                  selectedNoteId = n.id;
+                  selectedDrawingId = null;
+                "
+                @input="autosizeTextarea($event.target)"
+                @keydown.enter.stop
+                @blur="onNoteBlur(n)"
+              ></textarea>
+            </div>
           </div>
-        </div>
         </div>
       </div>
 
@@ -825,6 +1529,82 @@ onUnmounted(async () => {
           @wheel.prevent="onWheel"
         >
           <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
+
+          <svg
+            class="absolute inset-0"
+            viewBox="0 0 1000 1000"
+            preserveAspectRatio="none"
+            :style="{ pointerEvents: annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none' }"
+            @pointerdown.stop.prevent="
+              (e) => {
+                if (pencilTool === 'pen' || pencilTool === 'highlighter') beginStroke(p.page, pencilTool, e);
+                else if (pencilTool === 'eraser') beginErase(p.page, e);
+              }
+            "
+            @pointermove.stop.prevent="
+              (e) => {
+                if (pencilTool === 'pen' || pencilTool === 'highlighter') updateStroke(p.page, e);
+                else if (pencilTool === 'eraser') updateErase(p.page, e);
+              }
+            "
+            @pointerup.stop.prevent="
+              () => {
+                endStroke();
+                endErase();
+              }
+            "
+            @pointercancel.stop.prevent="
+              () => {
+                endStroke();
+                endErase();
+              }
+            "
+          >
+            <g v-for="d in drawings.filter((x) => Number(x.page) === p.page)" :key="d.id">
+              <path
+                v-if="selectedDrawingId === d.id"
+                :d="drawingPathD(d)"
+                fill="none"
+                stroke="rgb(99 102 241)"
+                :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 2px)`, opacity: 0.6 }"
+                vector-effect="non-scaling-stroke"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                pointer-events="none"
+              />
+            <path
+              :d="drawingPathD(d)"
+              fill="none"
+              stroke="transparent"
+              :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 12px)` }"
+              vector-effect="non-scaling-stroke"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              pointer-events="stroke"
+              @pointerdown.stop.prevent="
+                (e) => {
+                  if (pencilTool === 'eraser') beginErase(p.page, e);
+                  else beginDrawingDragCandidate(p.page, d, e);
+                }
+              "
+            />
+              <path
+                :d="drawingPathD(d)"
+                fill="none"
+                :style="drawingStyle(d)"
+                vector-effect="non-scaling-stroke"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                data-stroke
+                @pointerdown.stop.prevent="
+                  (e) => {
+                    if (pencilTool === 'eraser') beginErase(p.page, e);
+                    else beginDrawingDragCandidate(p.page, d, e);
+                  }
+                "
+              />
+            </g>
+          </svg>
 
           <div
             v-for="n in notes.filter((x) => Number(x.page) === p.page)"
@@ -846,23 +1626,29 @@ onUnmounted(async () => {
                   fontSize: `clamp(10px, calc(var(--page-w, 700px) * ${
                     Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) / 100 : 0.023
                   }), 28px)`,
-                  color: n.color === 'light' ? 'rgb(244 244 245)' : 'rgb(9 9 11)',
+                  color: noteTextColor(n),
                 }"
                 placeholder="Type…"
                 :ref="(el) => setNoteInputEl(n.id, el)"
                 @pointerdown.capture="beginNoteDragCandidate($event, n)"
                 @pointerdown.stop="
+                  if (pencilTool !== 'off') pencilTool = 'off';
                   annotateEnabled = true;
                   selectedNoteId = n.id;
+                  selectedDrawingId = null;
                 "
                 @click.stop="
+                  if (pencilTool !== 'off') pencilTool = 'off';
                   annotateEnabled = true;
                   selectedNoteId = n.id;
+                  selectedDrawingId = null;
                   editingNoteId = n.id;
                 "
                 @focus="
+                  if (pencilTool !== 'off') pencilTool = 'off';
                   annotateEnabled = true;
                   selectedNoteId = n.id;
+                  selectedDrawingId = null;
                 "
                 @input="autosizeTextarea($event.target)"
                 @keydown.enter.stop

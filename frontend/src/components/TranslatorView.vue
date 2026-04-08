@@ -132,6 +132,7 @@ function newSection(kind) {
       pagesTo: null,
       viewMode: "spread",
       notes: [],
+      drawings: [],
     };
   }
   return { id, type: kind, text: "" };
@@ -175,6 +176,7 @@ function ensureSectionShape(list) {
       const viewModeRaw = typeof s.viewMode === "string" ? s.viewMode : "";
       const viewMode = viewModeRaw === "single" ? "single" : "spread";
       const notes = Array.isArray(s.notes) ? s.notes : [];
+      const drawings = Array.isArray(s.drawings) ? s.drawings : [];
       return {
         id,
         type: "document",
@@ -191,8 +193,27 @@ function ensureSectionShape(list) {
             x: Number.isFinite(Number(n.x)) ? Number(n.x) : 0.1,
             y: Number.isFinite(Number(n.y)) ? Number(n.y) : 0.1,
             text: typeof n.text === "string" ? n.text : "",
-            fontSize: Number.isFinite(Number(n.fontSize)) ? Number(n.fontSize) : 16,
+            fontSizePct: Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) : 2.3,
             color: n.color === "light" ? "light" : "black",
+          })),
+        drawings: drawings
+          .filter((d) => d && typeof d === "object")
+          .map((d) => ({
+            id: d.id || crypto.randomUUID(),
+            page: Number.isFinite(Number(d.page)) ? Number(d.page) : 1,
+            tool: d.tool === "highlighter" ? "highlighter" : "pen",
+            color: d.color === "light" ? "light" : "black",
+            sizePct: Number.isFinite(Number(d.sizePct)) ? Number(d.sizePct) : 0.35,
+            x: Number.isFinite(Number(d.x)) ? Number(d.x) : 0,
+            y: Number.isFinite(Number(d.y)) ? Number(d.y) : 0,
+            points: Array.isArray(d.points)
+              ? d.points
+                  .filter((p) => p && typeof p === "object")
+                  .map((p) => ({
+                    x: Number.isFinite(Number(p.x)) ? Number(p.x) : 0,
+                    y: Number.isFinite(Number(p.y)) ? Number(p.y) : 0,
+                  }))
+              : [],
           })),
       };
     }
