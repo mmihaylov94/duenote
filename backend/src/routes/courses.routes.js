@@ -8,7 +8,13 @@ import { normalizeLangOrDefault, normalizeLangRequired } from "../utils/language
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { config } from "../config.js";
-import { storeMaterial, deleteStoredMaterial, streamStoredMaterialToResponse } from "../services/materials.service.js";
+import {
+  storeMaterial,
+  deleteStoredMaterial,
+  streamStoredMaterialToResponse,
+  readStoredMaterialBuffer,
+} from "../services/materials.service.js";
+import { PDFDocument } from "pdf-lib";
 
 export const coursesRouter = Router();
 coursesRouter.use(requireAuth);
@@ -255,6 +261,41 @@ coursesRouter.delete(
     if (!result.ok) return res.status(404).json({ error: "Not found" });
 
     res.status(204).end();
+  }),
+);
+
+coursesRouter.get(
+  "/:id/materials/:materialId/meta",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const materialId = Number(req.params.materialId);
+    if (!Number.isFinite(id) || !Number.isFinite(materialId)) return res.status(400).json({ error: "Invalid id" });
+
+    const material = await materialsRepo.getMaterial(id, userId(req), materialId);
+    if (!material) return res.status(404).json({ error: "Not found" });
+
+    const title = String(material.title || "").toLowerCase();
+    const mt = String(material.mimeType || "").toLowerCase();
+    if (!mt.includes("pdf") && !title.endsWith(".pdf")) {
+      return res.status(400).json({ error: "Not a PDF" });
+    }
+
+    const buf = await readStoredMaterialBuffer({
+      storage: material.storage,
+      storageKey: material.storageKey,
+    });
+    if (!buf) return res.status(404).json({ error: "File missing" });
+
+    try {
+      const pdfDoc = await PDFDocument.load(buf, { ignoreEncryption: true });
+      const pageCount = pdfDoc.getPageCount();
+      if (!Number.isFinite(pageCount) || pageCount <= 0) {
+        return res.status(422).json({ error: "Could not read PDF page count" });
+      }
+      res.json({ pageCount });
+    } catch {
+      return res.status(422).json({ error: "Could not read PDF page count" });
+    }
   }),
 );
 

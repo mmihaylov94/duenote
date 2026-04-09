@@ -1,4 +1,4 @@
-import { mkdir, writeFile, unlink, stat } from "node:fs/promises";
+import { mkdir, writeFile, unlink, stat, readFile } from "node:fs/promises";
 import { createReadStream, existsSync } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -148,5 +148,29 @@ export async function streamStoredMaterialToResponse({ storage, storageKey, mime
   res.setHeader("Content-Length", String(stInfo.size));
   await pipeline(createReadStream(absPath), res);
   return true;
+}
+
+/** Full file buffer for metadata (e.g. page count); null if missing. */
+export async function readStoredMaterialBuffer({ storage, storageKey }) {
+  const st = String(storage || "");
+  const key = String(storageKey || "");
+  if (!key) return null;
+
+  if (st === "s3") {
+    if (!isS3Configured()) return null;
+    const client = s3Client();
+    const out = await client.send(
+      new GetObjectCommand({
+        Bucket: config.s3Bucket,
+        Key: key,
+      }),
+    );
+    if (!out?.Body) return null;
+    return Buffer.from(await out.Body.transformToByteArray());
+  }
+
+  const absPath = path.join(resolvedMaterialsDir(), key);
+  if (!existsSync(absPath)) return null;
+  return readFile(absPath);
 }
 

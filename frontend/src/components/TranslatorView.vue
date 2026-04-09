@@ -16,7 +16,6 @@ import SelectionDictionaryFloater from "./SelectionDictionaryFloater.vue";
 import VideoSection from "./VideoSection.vue";
 import DocumentSection from "./DocumentSection.vue";
 import { apiFetch } from "../api/client.js";
-import * as pdfjsLib from "pdfjs-dist";
 
 const props = defineProps({
   workbookId: { type: Number, required: true },
@@ -482,21 +481,27 @@ async function loadPdfPageCount() {
   if (cid == null || !Number.isFinite(mid) || mid <= 0) return;
   pdfPageCountLoading.value = true;
   try {
-    const r = await apiFetch(`/api/courses/${cid}/materials/${mid}/download`);
+    const r = await apiFetch(`/api/courses/${cid}/materials/${mid}/meta`);
     if (!r.ok) {
-      pdfPageCountError.value = `Could not load PDF (HTTP ${r.status}).`;
+      let detail = `HTTP ${r.status}`;
+      try {
+        const j = await r.json();
+        if (j?.error) detail = String(j.error);
+      } catch {
+        /* ignore */
+      }
+      pdfPageCountError.value = `Could not load PDF info (${detail}).`;
       return;
     }
-    const buf = await r.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf, disableWorker: true }).promise;
-    pdfPageCount.value = Number.isFinite(Number(pdf.numPages)) ? Number(pdf.numPages) : null;
-    try {
-      await pdf.destroy?.();
-    } catch {
-      /* ignore */
+    const j = await r.json();
+    const n = Number(j?.pageCount);
+    pdfPageCount.value = Number.isFinite(n) && n > 0 ? n : null;
+    if (pdfPageCount.value == null) {
+      pdfPageCountError.value = "Could not read PDF page count.";
     }
-  } catch {
-    pdfPageCountError.value = "Could not read PDF page count.";
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    pdfPageCountError.value = msg ? `Could not read PDF page count: ${msg}` : "Could not read PDF page count.";
   } finally {
     pdfPageCountLoading.value = false;
   }
@@ -746,9 +751,6 @@ async function addSelectionToVocabulary(word, meaning) {
           <p v-else-if="pdfPageCountError" class="mt-2 text-sm text-red-600 dark:text-red-400">
             {{ pdfPageCountError }}
           </p>
-          <p v-else-if="pdfPageCount != null" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            This PDF has {{ pdfPageCount }} page{{ pdfPageCount === 1 ? "" : "s" }}.
-          </p>
           <p
             v-if="!documentModalError && pdfMaterials.length === 0"
             class="mt-2 text-sm text-zinc-500 dark:text-zinc-400"
@@ -766,7 +768,7 @@ async function addSelectionToVocabulary(word, meaning) {
               v-model="pdfPagesFromDraft"
               type="text"
               inputmode="numeric"
-              placeholder="(all)"
+              placeholder="1"
               class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
               @keydown.enter.prevent="confirmDocument"
             />
@@ -779,7 +781,7 @@ async function addSelectionToVocabulary(word, meaning) {
               v-model="pdfPagesToDraft"
               type="text"
               inputmode="numeric"
-              placeholder="(all)"
+              :placeholder="pdfPageCount != null ? String(pdfPageCount) : ''"
               class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
               @keydown.enter.prevent="confirmDocument"
             />
