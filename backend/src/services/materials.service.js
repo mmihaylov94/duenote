@@ -2,28 +2,9 @@ import { mkdir, writeFile, unlink, stat, readFile } from "node:fs/promises";
 import { createReadStream, existsSync } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-  GetObjectCommand,
-} from "@aws-sdk/client-s3";
+import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { config } from "../config.js";
-
-function s3Client() {
-  const opts = { region: config.s3Region };
-  if (config.awsAccessKeyId && config.awsSecretAccessKey) {
-    opts.credentials = {
-      accessKeyId: config.awsAccessKeyId,
-      secretAccessKey: config.awsSecretAccessKey,
-    };
-  }
-  return new S3Client(opts);
-}
-
-function isS3Configured() {
-  return Boolean(config.s3Bucket && config.s3Region);
-}
+import { createS3Client, isS3Configured } from "./s3.storage.js";
 
 function resolvedMaterialsDir() {
   const d = config.materialsLocalDir;
@@ -67,7 +48,7 @@ export async function storeMaterial({ courseId, materialId, buffer, mimeType, or
 
   if (isS3Configured()) {
     const key = s3ObjectKey(cid, mid, originalName);
-    const client = s3Client();
+    const client = createS3Client();
     await client.send(
       new PutObjectCommand({
         Bucket: config.s3Bucket,
@@ -95,7 +76,7 @@ export async function deleteStoredMaterial({ storage, storageKey }) {
 
   if (st === "s3") {
     if (!isS3Configured()) return;
-    const client = s3Client();
+    const client = createS3Client();
     try {
       await client.send(
         new DeleteObjectCommand({
@@ -128,7 +109,7 @@ export async function streamStoredMaterialToResponse({ storage, storageKey, mime
 
   if (st === "s3") {
     if (!isS3Configured()) return false;
-    const client = s3Client();
+    const client = createS3Client();
     const out = await client.send(
       new GetObjectCommand({
         Bucket: config.s3Bucket,
@@ -158,7 +139,7 @@ export async function readStoredMaterialBuffer({ storage, storageKey }) {
 
   if (st === "s3") {
     if (!isS3Configured()) return null;
-    const client = s3Client();
+    const client = createS3Client();
     const out = await client.send(
       new GetObjectCommand({
         Bucket: config.s3Bucket,

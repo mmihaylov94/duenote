@@ -116,6 +116,11 @@ function downloadUrl(m) {
 
 async function removeMaterial(m) {
   if (!m?.id || deletingId.value != null) return;
+  const name = String(m.title || "this file").trim() || "this file";
+  const ok = window.confirm(
+    `Delete "${name}"? Any document sections in this course that use this file will be removed. This cannot be undone.`,
+  );
+  if (!ok) return;
   deletingId.value = m.id;
   actionError.value = "";
   try {

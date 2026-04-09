@@ -166,6 +166,40 @@ export async function updateWorkbook(id, userId, fields) {
   return w;
 }
 
+/**
+ * Remove every document section that references the given material in all workbooks of the course.
+ * Updates pins for removed section ids. No-op if user does not own the course.
+ */
+export async function removeDocumentSectionsUsingMaterial(courseId, materialId, userId) {
+  const cid = Number(courseId);
+  const mid = Number(materialId);
+  const uid = Number(userId);
+  if (!Number.isFinite(cid) || !Number.isFinite(mid) || !Number.isFinite(uid)) return { updated: 0 };
+
+  const { rows } = await pool.query(
+    `SELECT w.id, w.content_json
+     FROM workbooks w
+     INNER JOIN courses c ON c.id = w.course_id AND c.user_id = $1
+     WHERE w.course_id = $2`,
+    [uid, cid],
+  );
+
+  let updated = 0;
+  for (const row of rows) {
+    const sections = parseSectionsFromRow(row);
+    const next = sections.filter((s) => {
+      if (s?.type !== "document") return true;
+      const mat = s.materialId != null ? Number(s.materialId) : NaN;
+      return !Number.isFinite(mat) || mat !== mid;
+    });
+    if (next.length === sections.length) continue;
+    const finalSections = next.length > 0 ? next : [defaultHeaderSection()];
+    const w = await updateWorkbook(row.id, uid, { sections: finalSections });
+    if (w) updated += 1;
+  }
+  return { updated };
+}
+
 export async function deleteWorkbook(id, userId) {
   const w = await getWorkbook(id, userId);
   if (!w) return false;

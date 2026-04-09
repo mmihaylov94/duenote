@@ -2,12 +2,11 @@ import { mkdir, readdir, unlink, writeFile, stat } from "node:fs/promises";
 import { createReadStream, existsSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
-import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-} from "@aws-sdk/client-s3";
+import { PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { config } from "../config.js";
+import { createS3Client, isS3Configured } from "./s3.storage.js";
+
+export { isS3Configured };
 
 const MIME_TO_EXT = {
   "image/jpeg": ".jpg",
@@ -22,23 +21,8 @@ function resolvedAvatarDir() {
   return path.resolve(process.cwd(), d);
 }
 
-export function isS3Configured() {
-  return Boolean(config.s3Bucket && config.s3Region);
-}
-
 export function extForMime(mime) {
   return MIME_TO_EXT[mime] || null;
-}
-
-function s3Client() {
-  const opts = { region: config.s3Region };
-  if (config.awsAccessKeyId && config.awsSecretAccessKey) {
-    opts.credentials = {
-      accessKeyId: config.awsAccessKeyId,
-      secretAccessKey: config.awsSecretAccessKey,
-    };
-  }
-  return new S3Client(opts);
 }
 
 /** Stable object key per user (overwrite on each upload). */
@@ -97,7 +81,7 @@ export async function storeUploadedAvatar(userId, buffer, mime) {
   if (isS3Configured()) {
     await deleteStoredAvatar(userId);
     const key = s3ObjectKey(userId);
-    const client = s3Client();
+    const client = createS3Client();
     await client.send(
       new PutObjectCommand({
         Bucket: config.s3Bucket,
@@ -125,7 +109,7 @@ export async function storeUploadedAvatar(userId, buffer, mime) {
 
 export async function removeS3Avatar(userId) {
   if (!isS3Configured()) return;
-  const client = s3Client();
+  const client = createS3Client();
   const key = s3ObjectKey(userId);
   try {
     await client.send(

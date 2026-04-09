@@ -8,6 +8,8 @@ import * as otpRepo from "../db/otp.repository.js";
 import { pool } from "../db/pool.js";
 import { sendOtpEmail } from "../services/mail.service.js";
 import * as avatarService from "../services/avatar.service.js";
+import * as materialsRepo from "../db/materials.repository.js";
+import { deleteStoredMaterial } from "../services/materials.service.js";
 import { config } from "../config.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { requireAuth } from "../middleware/requireAuth.js";
@@ -188,6 +190,18 @@ authRouter.delete(
 
     // Best-effort cleanup of uploaded avatars (local disk / S3). Safe if user had no upload.
     await avatarService.deleteStoredAvatar(uid);
+
+    const mats = await materialsRepo.listAllMaterialsForUser(uid);
+    for (const m of mats) {
+      const st = String(m.storage || "");
+      const key = String(m.storageKey || "");
+      if (!key || st === "pending") continue;
+      try {
+        await deleteStoredMaterial({ storage: st, storageKey: key });
+      } catch {
+        /* ignore */
+      }
+    }
 
     const client = await pool.connect();
     try {

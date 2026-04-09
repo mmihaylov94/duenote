@@ -61,9 +61,14 @@ export const config = {
   materialsLocalDir: trim(process.env.MATERIALS_UPLOAD_DIR) || "./data/uploads/materials",
   /** Max upload size for materials (bytes). */
   materialsMaxBytes: Math.min(Number(process.env.MATERIALS_MAX_BYTES) || 25 * 1024 * 1024, 250 * 1024 * 1024),
-  /** When set with region, new avatar uploads go to S3 instead of disk. */
+  /**
+   * When both bucket and region are non-empty, new file uploads go to S3:
+   * profile avatars and course materials. Leave either blank to keep using local dirs above.
+   * Omit AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY to use the instance/task role (recommended on AWS).
+   */
   s3Bucket: trim(process.env.S3_BUCKET),
-  s3Region: trim(process.env.S3_REGION),
+  /** Prefer S3_REGION; falls back to AWS_REGION (e.g. set automatically on ECS/Lambda). */
+  s3Region: trim(process.env.S3_REGION || process.env.AWS_REGION || ""),
   /** Optional prefix for keys, e.g. `prod/` */
   s3KeyPrefix: trim(process.env.S3_KEY_PREFIX || "").replace(/^\/+|\/+$/g, ""),
   /** Public base URL for avatar objects (e.g. CloudFront). If unset, virtual-hosted–style S3 URL is used. */

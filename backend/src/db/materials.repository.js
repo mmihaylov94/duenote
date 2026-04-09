@@ -86,6 +86,24 @@ export async function updateMaterialStorage(courseId, userId, materialId, { stor
   return rowToMaterial(rows[0]);
 }
 
+/** All course materials for a user (for storage cleanup before account deletion). */
+export async function listAllMaterialsForUser(userId) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid)) return [];
+  const { rows } = await pool.query(
+    `SELECT m.id, m.course_id, m.storage, m.storage_key
+     FROM course_materials m
+     INNER JOIN courses c ON c.id = m.course_id AND c.user_id = $1`,
+    [uid],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    courseId: r.course_id,
+    storage: r.storage,
+    storageKey: r.storage_key,
+  }));
+}
+
 export async function deleteMaterial(courseId, userId, materialId) {
   const cid = Number(courseId);
   const uid = Number(userId);

@@ -4,6 +4,7 @@ import * as courseRepo from "../db/courses.repository.js";
 import * as coursePinsRepo from "../db/coursePins.repository.js";
 import * as vocabEntriesRepo from "../db/vocabularyEntries.repository.js";
 import * as materialsRepo from "../db/materials.repository.js";
+import * as workbookRepo from "../db/workbooks.repository.js";
 import { normalizeLangOrDefault, normalizeLangRequired } from "../utils/languages.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { requireAuth } from "../middleware/requireAuth.js";
@@ -256,6 +257,7 @@ coursesRouter.delete(
     const material = await materialsRepo.getMaterial(id, userId(req), materialId);
     if (!material) return res.status(404).json({ error: "Not found" });
 
+    await workbookRepo.removeDocumentSectionsUsingMaterial(id, materialId, userId(req));
     await deleteStoredMaterial({ storage: material.storage, storageKey: material.storageKey });
     const result = await materialsRepo.deleteMaterial(id, userId(req), materialId);
     if (!result.ok) return res.status(404).json({ error: "Not found" });
