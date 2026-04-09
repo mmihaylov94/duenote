@@ -20,6 +20,9 @@ const uploadError = ref("");
 const deletingId = ref(null);
 const actionError = ref("");
 
+const confirmDeleteOpen = ref(false);
+const confirmDeleteMaterial = ref(null);
+
 function formatBytes(n) {
   const v = Number(n);
   if (!Number.isFinite(v) || v < 0) return "-";
@@ -114,13 +117,20 @@ function downloadUrl(m) {
   return `/api/courses/${props.course.id}/materials/${m.id}/download`;
 }
 
-async function removeMaterial(m) {
+function openConfirmDelete(m) {
   if (!m?.id || deletingId.value != null) return;
-  const name = String(m.title || "this file").trim() || "this file";
-  const ok = window.confirm(
-    `Delete "${name}"? Any document sections in this course that use this file will be removed. This cannot be undone.`,
-  );
-  if (!ok) return;
+  confirmDeleteMaterial.value = m;
+  confirmDeleteOpen.value = true;
+}
+
+function closeConfirmDelete() {
+  confirmDeleteOpen.value = false;
+  confirmDeleteMaterial.value = null;
+}
+
+async function confirmDeleteMaterialNow() {
+  const m = confirmDeleteMaterial.value;
+  if (!m?.id || deletingId.value != null) return;
   deletingId.value = m.id;
   actionError.value = "";
   try {
@@ -131,6 +141,7 @@ async function removeMaterial(m) {
       return;
     }
     await load();
+    closeConfirmDelete();
   } catch {
     actionError.value = "Cannot reach the server.";
   } finally {
@@ -139,7 +150,9 @@ async function removeMaterial(m) {
 }
 
 function onKeydown(e) {
-  if (e.key === "Escape") emit("close");
+  if (e.key !== "Escape") return;
+  if (confirmDeleteOpen.value) closeConfirmDelete();
+  else emit("close");
 }
 
 onMounted(() => {
@@ -264,7 +277,7 @@ onUnmounted(() => {
                       type="button"
                       class="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:bg-zinc-900 dark:text-red-300 dark:hover:bg-red-950/40"
                       :disabled="deletingId === m.id"
-                      @click="removeMaterial(m)"
+                      @click="openConfirmDelete(m)"
                     >
                       {{ deletingId === m.id ? "Deleting…" : "Delete" }}
                     </button>
@@ -274,6 +287,63 @@ onUnmounted(() => {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    v-if="confirmDeleteOpen"
+    class="fixed inset-0 z-[102] flex items-center justify-center bg-black/40 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Confirm delete material"
+    @click.self="closeConfirmDelete"
+  >
+    <div
+      class="w-full max-w-lg overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+      @click.stop
+    >
+      <div class="flex items-start justify-between gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div class="min-w-0">
+          <h3 class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Delete material?</h3>
+          <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+            This will remove the file and delete any document sections in this course that use it.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          aria-label="Close"
+          @click="closeConfirmDelete"
+        >
+          <XMarkIcon class="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div class="px-5 py-4">
+        <p class="text-sm text-zinc-700 dark:text-zinc-200">
+          File: <span class="font-medium">{{ confirmDeleteMaterial?.title || "-" }}</span>
+        </p>
+        <p class="mt-2 text-sm text-red-700 dark:text-red-300">This cannot be undone.</p>
+      </div>
+
+      <div class="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <button
+          type="button"
+          class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          :disabled="deletingId != null"
+          @click="closeConfirmDelete"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-500 disabled:opacity-50"
+          :disabled="deletingId != null"
+          @click="confirmDeleteMaterialNow"
+        >
+          {{ deletingId != null ? "Deleting…" : "Delete" }}
+        </button>
       </div>
     </div>
   </div>

@@ -242,6 +242,7 @@ const stepSize = computed(() => (viewMode.value === "single" ? 1 : 2));
 let pdfDoc = null;
 let lastRenderedKey = "";
 const singleScrollerEl = ref(null);
+const spreadScrollerEl = ref(null);
 
 let scrollCooldownId = null;
 let lastScrollTop = 0;
@@ -287,6 +288,51 @@ function onSingleWheel(e) {
   if ((e.deltaY > 0 && atBottom) || (e.deltaY < 0 && atTop)) {
     e.preventDefault();
     maybeFlipPageFromSingleScroll(e.deltaY > 0 ? 1 : -1);
+  }
+}
+
+function maybeFlipPageFromSpreadScroll(direction) {
+  if (viewMode.value !== "spread") return;
+  if (scrollCooldownId != null) return;
+  const list = availablePages.value;
+  if (!list.length) return;
+  const canPrev = activeIdx.value - stepSize.value >= 0;
+  const canNext = activeIdx.value + stepSize.value <= list.length - 1;
+  const el = spreadScrollerEl.value;
+  if (!el) return;
+  const atTop = el.scrollTop <= 0;
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+  if (direction > 0 && atBottom) {
+    if (!canNext) return false;
+    scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
+    goNext();
+    nextTick(() => {
+      const s = spreadScrollerEl.value;
+      if (s) s.scrollTop = 0;
+    });
+    return true;
+  } else if (direction < 0 && atTop) {
+    if (!canPrev) return false;
+    scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
+    goPrev();
+    nextTick(() => {
+      const s = spreadScrollerEl.value;
+      if (s) s.scrollTop = s.scrollHeight;
+    });
+    return true;
+  }
+  return false;
+}
+
+function onSpreadWheel(e) {
+  if (viewMode.value !== "spread") return;
+  const el = spreadScrollerEl.value;
+  if (!el) return;
+  const atTop = el.scrollTop <= 0;
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+  if ((e.deltaY > 0 && atBottom) || (e.deltaY < 0 && atTop)) {
+    const didFlip = maybeFlipPageFromSpreadScroll(e.deltaY > 0 ? 1 : -1);
+    if (didFlip) e.preventDefault();
   }
 }
 
@@ -1522,19 +1568,20 @@ onUnmounted(async () => {
 
       <div
         v-else
-        class="grid gap-3"
-        :class="viewMode === 'spread' ? 'sm:grid-cols-2' : 'grid-cols-1'"
+        class="h-full overflow-auto overscroll-contain rounded-md"
+        ref="spreadScrollerEl"
+        @wheel="onSpreadWheel"
       >
-        <div
-          v-for="p in renderedPages"
-          :key="p.page"
-          class="relative w-full overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700"
-          data-pdf-page
-          :ref="(el) => setPageEl(p.page, el)"
-          @click="onPageClick($event, p.page)"
-          @wheel.prevent="onWheel"
-        >
-          <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
+        <div class="grid gap-3" :class="viewMode === 'spread' ? 'sm:grid-cols-2' : 'grid-cols-1'">
+          <div
+            v-for="p in renderedPages"
+            :key="p.page"
+            class="relative w-full overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-700"
+            data-pdf-page
+            :ref="(el) => setPageEl(p.page, el)"
+            @click="onPageClick($event, p.page)"
+          >
+            <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
 
           <svg
             class="absolute inset-0"
@@ -1661,6 +1708,7 @@ onUnmounted(async () => {
                 @blur="onNoteBlur(n)"
               ></textarea>
             </div>
+          </div>
           </div>
         </div>
       </div>
