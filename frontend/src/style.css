@@ -11,3 +11,19 @@ body {
 #app {
   min-height: 100%;
 }
+
+/**
+ * Locked only while NotebookApp (/app) is mounted: prevents a second (window)
+ * scrollbar when tall workbook content (e.g. multiple document sections)
+ * would otherwise extend the document scroll height past the viewport.
+ */
+html.duenote-app-shell,
+html.duenote-app-shell body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.duenote-app-shell #app {
+  height: 100%;
+  overflow: hidden;
+}

@@ -15,6 +15,8 @@ import { apiFetch, apiOriginLabel } from "./api/client.js";
 
 const router = useRouter();
 
+const APP_SHELL_SCROLL_LOCK_CLASS = "duenote-app-shell";
+
 /** Scrollport for workbook content; drives --workbook-scroll-h for quick access height. */
 const workbookScrollEl = ref(null);
 let workbookScrollResizeObserver = null;
@@ -26,6 +28,8 @@ function updateWorkbookScrollHeightVar() {
 }
 
 onMounted(() => {
+  document.documentElement.classList.add(APP_SHELL_SCROLL_LOCK_CLASS);
+  document.body.classList.add(APP_SHELL_SCROLL_LOCK_CLASS);
   nextTick(() => {
     updateWorkbookScrollHeightVar();
     const el = workbookScrollEl.value;
@@ -38,6 +42,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  document.documentElement.classList.remove(APP_SHELL_SCROLL_LOCK_CLASS);
+  document.body.classList.remove(APP_SHELL_SCROLL_LOCK_CLASS);
   workbookScrollResizeObserver?.disconnect();
   workbookScrollResizeObserver = null;
 });
@@ -580,7 +586,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex h-dvh min-h-0 flex-col bg-zinc-100 dark:bg-zinc-950">
+  <div
+    class="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-zinc-100 dark:bg-zinc-950"
+  >
     <p
       v-if="apiError"
       class="shrink-0 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-100"
@@ -670,7 +678,10 @@ onMounted(async () => {
             </div>
           </div>
         </div>
-        <div ref="workbookScrollEl" class="min-h-0 flex-1 overflow-auto">
+        <div
+          ref="workbookScrollEl"
+          class="min-h-0 flex-1 overflow-auto bg-zinc-50 dark:bg-zinc-950"
+        >
           <TranslatorView
             v-if="currentWorkbookId != null"
             :key="currentWorkbookId"

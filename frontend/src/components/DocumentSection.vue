@@ -3,7 +3,11 @@ import { ref, watch, computed, onUnmounted, onMounted, nextTick } from "vue";
 import { apiFetch } from "../api/client.js";
 // Custom icons used for page view toggle.
 import iro from "@jaames/iro";
-import { Pencil as LucidePencil, Highlighter as LucideHighlighter, Eraser as LucideEraser } from "lucide-vue-next";
+import {
+  Pencil as LucidePencil,
+  Highlighter as LucideHighlighter,
+  Eraser as LucideEraser,
+} from "lucide-vue-next";
 
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -103,7 +107,8 @@ function applyPencilDefaultsFromSelected() {
   const d = selectedDrawing();
   if (!d) return;
   if (d.color === "light" || d.color === "black") pencilColor.value = d.color;
-  if (Number.isFinite(Number(d.sizePct))) pencilSizePct.value = Number(d.sizePct);
+  if (Number.isFinite(Number(d.sizePct)))
+    pencilSizePct.value = Number(d.sizePct);
   if (d.tool === "pen" || d.tool === "highlighter") pencilTool.value = d.tool;
 }
 
@@ -141,7 +146,8 @@ function setPageEl(pageNumber, el) {
     pageResizeObservers.set(p, ro);
     // Initialize immediately (in case ResizeObserver is slow to fire).
     const w0 = el.getBoundingClientRect?.().width;
-    if (Number.isFinite(w0) && w0 > 0) el.style.setProperty("--page-w", `${w0}px`);
+    if (Number.isFinite(w0) && w0 > 0)
+      el.style.setProperty("--page-w", `${w0}px`);
   } else {
     const ro = pageResizeObservers.get(p);
     if (ro) {
@@ -199,11 +205,20 @@ async function focusNote(id) {
 
 let cancelled = false;
 
-const hasPdf = computed(() => Number.isFinite(Number(section.value?.materialId)));
-const notes = computed(() => (Array.isArray(section.value?.notes) ? section.value.notes : []));
-const drawings = computed(() => (Array.isArray(section.value?.drawings) ? section.value.drawings : []));
+const hasPdf = computed(() =>
+  Number.isFinite(Number(section.value?.materialId)),
+);
+const notes = computed(() =>
+  Array.isArray(section.value?.notes) ? section.value.notes : [],
+);
+const drawings = computed(() =>
+  Array.isArray(section.value?.drawings) ? section.value.drawings : [],
+);
 const docTitle = computed(() => {
-  const t = typeof section.value?.materialTitle === "string" ? section.value.materialTitle.trim() : "";
+  const t =
+    typeof section.value?.materialTitle === "string"
+      ? section.value.materialTitle.trim()
+      : "";
   const id = section.value?.materialId;
   if (t) return t;
   if (Number.isFinite(Number(id))) return `PDF #${Number(id)}`;
@@ -213,7 +228,10 @@ const docTitle = computed(() => {
 async function ensureMaterialTitle() {
   const cid = Number(props.courseId);
   const mid = Number(section.value?.materialId);
-  const existing = typeof section.value?.materialTitle === "string" ? section.value.materialTitle.trim() : "";
+  const existing =
+    typeof section.value?.materialTitle === "string"
+      ? section.value.materialTitle.trim()
+      : "";
   if (existing) return;
   if (!Number.isFinite(cid) || cid <= 0) return;
   if (!Number.isFinite(mid) || mid <= 0) return;
@@ -231,8 +249,10 @@ async function ensureMaterialTitle() {
 }
 
 const pageRangeLabel = computed(() => {
-  const from = section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
-  const to = section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
+  const from =
+    section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
+  const to =
+    section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
   const fromOk = Number.isFinite(from) && from > 0;
   const toOk = Number.isFinite(to) && to > 0;
   if (!fromOk && !toOk) return "[all]";
@@ -249,7 +269,9 @@ const availablePages = computed(() => {
 });
 
 const activeIdx = ref(0);
-const activePageNumber = computed(() => availablePages.value[activeIdx.value] ?? null);
+const activePageNumber = computed(
+  () => availablePages.value[activeIdx.value] ?? null,
+);
 const activePageNumbersLabel = computed(() => {
   const list = availablePages.value;
   if (!list.length) return "-";
@@ -260,7 +282,9 @@ const activePageNumbersLabel = computed(() => {
   return "-";
 });
 
-const viewMode = computed(() => (section.value?.viewMode === "single" ? "single" : "spread"));
+const viewMode = computed(() =>
+  section.value?.viewMode === "single" ? "single" : "spread",
+);
 const stepSize = computed(() => (viewMode.value === "single" ? 1 : 2));
 
 let pdfDoc = null;
@@ -270,35 +294,47 @@ const spreadScrollerEl = ref(null);
 
 let scrollCooldownId = null;
 let lastScrollTop = 0;
+/** @returns {boolean} true if we moved to another page */
 function maybeFlipPageFromSingleScroll(direction) {
-  if (viewMode.value !== "single") return;
-  if (scrollCooldownId != null) return;
+  if (viewMode.value !== "single") return false;
+  if (scrollCooldownId != null) return false;
+  const list = availablePages.value;
+  if (!list.length) return false;
+  const canPrev = activeIdx.value - stepSize.value >= 0;
+  const canNext = activeIdx.value + stepSize.value <= list.length - 1;
   const el = singleScrollerEl.value;
-  if (!el) return;
+  if (!el) return false;
   const atTop = el.scrollTop <= 0;
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
   if (direction > 0 && atBottom) {
+    if (!canNext) return false;
     scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
     goNext();
     nextTick(() => {
       const s = singleScrollerEl.value;
       if (s) s.scrollTop = 0;
     });
-  } else if (direction < 0 && atTop) {
+    return true;
+  }
+  if (direction < 0 && atTop) {
+    if (!canPrev) return false;
     scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
     goPrev();
     nextTick(() => {
       const s = singleScrollerEl.value;
       if (s) s.scrollTop = 0;
     });
+    return true;
   }
+  return false;
 }
 
 function onSingleScroll() {
   if (viewMode.value !== "single") return;
   const el = singleScrollerEl.value;
   if (!el) return;
-  const dir = el.scrollTop > lastScrollTop ? 1 : el.scrollTop < lastScrollTop ? -1 : 0;
+  const dir =
+    el.scrollTop > lastScrollTop ? 1 : el.scrollTop < lastScrollTop ? -1 : 0;
   lastScrollTop = el.scrollTop;
   if (dir) maybeFlipPageFromSingleScroll(dir);
 }
@@ -310,8 +346,8 @@ function onSingleWheel(e) {
   const atTop = el.scrollTop <= 0;
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
   if ((e.deltaY > 0 && atBottom) || (e.deltaY < 0 && atTop)) {
-    e.preventDefault();
-    maybeFlipPageFromSingleScroll(e.deltaY > 0 ? 1 : -1);
+    const flipped = maybeFlipPageFromSingleScroll(e.deltaY > 0 ? 1 : -1);
+    if (flipped) e.preventDefault();
   }
 }
 
@@ -404,7 +440,9 @@ function removeNote(id) {
 function selectedDrawing() {
   const id = selectedDrawingId.value;
   if (!id) return null;
-  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const list = Array.isArray(section.value?.drawings)
+    ? section.value.drawings
+    : [];
   return list.find((d) => d?.id === id) || null;
 }
 
@@ -415,7 +453,9 @@ function removeDrawing(id) {
 }
 
 function drawingStyle(d) {
-  const sizePct = Number.isFinite(Number(d?.sizePct)) ? Number(d.sizePct) : 0.35;
+  const sizePct = Number.isFinite(Number(d?.sizePct))
+    ? Number(d.sizePct)
+    : 0.35;
   const colorRaw = d?.color;
   const color =
     colorRaw === "light"
@@ -447,7 +487,10 @@ function togglePencilColor() {
     }
     return;
   }
-  pencilColor.value = String(pencilColor.value || "#0a0a0a").toLowerCase() === "#f4f4f5" ? "#0a0a0a" : "#f4f4f5";
+  pencilColor.value =
+    String(pencilColor.value || "#0a0a0a").toLowerCase() === "#f4f4f5"
+      ? "#0a0a0a"
+      : "#f4f4f5";
 }
 
 function changePencilThickness(delta) {
@@ -455,13 +498,18 @@ function changePencilThickness(delta) {
   if (selectedKind.value === "drawing") {
     const d = selectedDrawing();
     if (!d) return;
-    const cur = Number.isFinite(Number(d.sizePct)) ? Number(d.sizePct) : pencilSizePct.value;
+    const cur = Number.isFinite(Number(d.sizePct))
+      ? Number(d.sizePct)
+      : pencilSizePct.value;
     const next = Math.max(0.15, Math.min(1.2, cur + delta * step));
     d.sizePct = next;
     pencilSizePct.value = next;
     return;
   }
-  pencilSizePct.value = Math.max(0.15, Math.min(1.2, pencilSizePct.value + delta * step));
+  pencilSizePct.value = Math.max(
+    0.15,
+    Math.min(1.2, pencilSizePct.value + delta * step),
+  );
 }
 
 function colorForSelectedKind() {
@@ -512,7 +560,10 @@ function openColorPicker(target, e) {
     const popW = 220;
     const popH = 250;
     const margin = 8;
-    let left = Math.min(window.innerWidth - popW - margin, Math.max(margin, r.left));
+    let left = Math.min(
+      window.innerWidth - popW - margin,
+      Math.max(margin, r.left),
+    );
     let top = r.bottom + margin;
     let placement = "bottom";
     if (top + popH > window.innerHeight - margin) {
@@ -524,7 +575,8 @@ function openColorPicker(target, e) {
   }
   nextTick(() => {
     if (!colorPickerEl.value) return;
-    const initial = target === "pencil" ? pencilColor.value : colorForSelectedKind();
+    const initial =
+      target === "pencil" ? pencilColor.value : colorForSelectedKind();
     // The popover container is created/destroyed by Vue (v-if), so we must
     // (re)mount the picker into the current element every time.
     try {
@@ -567,7 +619,11 @@ function closeColorPicker() {
 
 function onGlobalPointerDownForColorPicker(e) {
   if (!colorPickerOpen.value) return;
-  if (e.target instanceof Element && e.target.closest?.("[data-color-picker-root]")) return;
+  if (
+    e.target instanceof Element &&
+    e.target.closest?.("[data-color-picker-root]")
+  )
+    return;
   closeColorPicker();
 }
 
@@ -600,7 +656,9 @@ function clearSelection() {
 
 function pagePointFromEvent(pageNumber, e, preferCurrentTarget = false) {
   const targetEl =
-    preferCurrentTarget && e?.currentTarget instanceof Element ? e.currentTarget : getPageElByNumber(pageNumber);
+    preferCurrentTarget && e?.currentTarget instanceof Element
+      ? e.currentTarget
+      : getPageElByNumber(pageNumber);
   const box = targetEl?.getBoundingClientRect?.();
   if (!box || !box.width || !box.height) return null;
   const x = (e.clientX - box.left) / box.width;
@@ -632,7 +690,9 @@ function beginStroke(pageNumber, tool, e) {
     /* ignore */
   }
   const id = crypto.randomUUID();
-  const baseSizePct = Number.isFinite(Number(pencilSizePct.value)) ? Number(pencilSizePct.value) : 0.35;
+  const baseSizePct = Number.isFinite(Number(pencilSizePct.value))
+    ? Number(pencilSizePct.value)
+    : 0.35;
   const stroke = {
     id,
     page: pageNumber,
@@ -655,7 +715,9 @@ function beginStroke(pageNumber, tool, e) {
 function updateStroke(pageNumber, e) {
   const id = activeStrokeId.value;
   if (!drawingInProgress.value || !id) return;
-  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const list = Array.isArray(section.value?.drawings)
+    ? section.value.drawings
+    : [];
   const stroke = list.find((d) => d?.id === id);
   if (!stroke) return;
   const p = pagePointFromEvent(pageNumber, e, true);
@@ -670,7 +732,9 @@ function endStroke() {
   drawingInProgress.value = false;
   activeStrokeId.value = null;
   if (!id) return;
-  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const list = Array.isArray(section.value?.drawings)
+    ? section.value.drawings
+    : [];
   const stroke = list.find((d) => d?.id === id);
   const ptsLen = stroke?.points?.length ?? 0;
   if (ptsLen < 2) removeDrawing(id);
@@ -708,13 +772,16 @@ function eraseAt(pageNumber, e) {
     const ox = Number.isFinite(Number(d.x)) ? Number(d.x) : 0;
     const oy = Number.isFinite(Number(d.y)) ? Number(d.y) : 0;
     for (const pt of pts) {
-      const dx = (pt.x + ox) - p.x;
-      const dy = (pt.y + oy) - p.y;
+      const dx = pt.x + ox - p.x;
+      const dy = pt.y + oy - p.y;
       if (dx * dx + dy * dy <= thresh2) return false;
     }
     return true;
   });
-  if (selectedDrawingId.value && !section.value.drawings.some((d) => d.id === selectedDrawingId.value)) {
+  if (
+    selectedDrawingId.value &&
+    !section.value.drawings.some((d) => d.id === selectedDrawingId.value)
+  ) {
     selectedDrawingId.value = null;
   }
   e.preventDefault();
@@ -767,7 +834,12 @@ function clampDrawingOffset(stroke, nextX, nextY) {
     maxX = Math.max(maxX, x);
     maxY = Math.max(maxY, y);
   }
-  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+  if (
+    !Number.isFinite(minX) ||
+    !Number.isFinite(minY) ||
+    !Number.isFinite(maxX) ||
+    !Number.isFinite(maxY)
+  ) {
     return { x: nextX, y: nextY };
   }
   const loX = -minX;
@@ -783,7 +855,9 @@ function clampDrawingOffset(stroke, nextX, nextY) {
 function onDrawingDragMove(e) {
   const d = drawingDrag.value;
   if (!d) return;
-  const list = Array.isArray(section.value?.drawings) ? section.value.drawings : [];
+  const list = Array.isArray(section.value?.drawings)
+    ? section.value.drawings
+    : [];
   const stroke = list.find((x) => x?.id === d.id);
   if (!stroke) return;
   const dxPx = e.clientX - d.startClientX;
@@ -888,7 +962,7 @@ function noteStyle(n) {
   const t = typeof n.text === "string" ? n.text : "";
   const longestLine = t
     .split("\n")
-    .reduce((m, s) => Math.max(m, (typeof s === "string" ? s.length : 0)), 0);
+    .reduce((m, s) => Math.max(m, typeof s === "string" ? s.length : 0), 0);
   const ch = Math.max(10, Math.min(90, longestLine + 4));
   return {
     left: `${clamp01(n.x, 0.1) * 100}%`,
@@ -907,9 +981,12 @@ function autosizeTextarea(el) {
     const lh = Number.parseFloat(cs.lineHeight);
     const fs = Number.parseFloat(cs.fontSize);
     const lineHeight = Number.isFinite(lh) ? lh : Math.max(12, fs * 1.2);
-    const padY = (Number.parseFloat(cs.paddingTop) || 0) + (Number.parseFloat(cs.paddingBottom) || 0);
+    const padY =
+      (Number.parseFloat(cs.paddingTop) || 0) +
+      (Number.parseFloat(cs.paddingBottom) || 0);
     const borderY =
-      (Number.parseFloat(cs.borderTopWidth) || 0) + (Number.parseFloat(cs.borderBottomWidth) || 0);
+      (Number.parseFloat(cs.borderTopWidth) || 0) +
+      (Number.parseFloat(cs.borderBottomWidth) || 0);
     const minH = Math.ceil(lineHeight + padY + borderY);
 
     el.style.height = "0px";
@@ -941,7 +1018,9 @@ function changeSelectedSize(delta) {
   if (selectedKind.value === "note") {
     const n = selectedNote();
     if (!n) return;
-    const cur = Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) : 2.3;
+    const cur = Number.isFinite(Number(n.fontSizePct))
+      ? Number(n.fontSizePct)
+      : 2.3;
     const next = cur + delta * 0.15;
     n.fontSizePct = Math.max(1.0, Math.min(4.0, next));
   } else if (selectedKind.value === "drawing") {
@@ -957,8 +1036,10 @@ function onPageClick(e, pageNumber) {
   if (!annotateEnabled.value) return;
   if (pencilTool.value !== "off") return;
   // Do not add a new note when clicking an existing note.
-  if (e.target instanceof HTMLElement && e.target.closest?.("[data-note]")) return;
-  if (e.target instanceof HTMLElement && e.target.closest?.("[data-stroke]")) return;
+  if (e.target instanceof HTMLElement && e.target.closest?.("[data-note]"))
+    return;
+  if (e.target instanceof HTMLElement && e.target.closest?.("[data-stroke]"))
+    return;
   // If a note is currently selected/being edited, a click on the page should
   // only unfocus (exit editing) and NOT create a new note.
   if (selectedNoteId.value || editingNoteId.value || selectedDrawingId.value) {
@@ -1009,19 +1090,6 @@ function goPrev() {
   goToIdx(activeIdx.value - stepSize.value);
 }
 
-let wheelCooldownId = null;
-function onWheel(e) {
-  if (!availablePages.value.length) return;
-  if (wheelCooldownId != null) return;
-  const dy = e.deltaY;
-  if (Math.abs(dy) < 8) return;
-  if (dy > 0) goNext();
-  else goPrev();
-  wheelCooldownId = window.setTimeout(() => {
-    wheelCooldownId = null;
-  }, 180);
-}
-
 function onKeydown(e) {
   // Delete selected note in move mode.
   if (
@@ -1055,12 +1123,18 @@ function onKeydown(e) {
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
-  window.addEventListener("pointerdown", onGlobalPointerDownForColorPicker, true);
+  window.addEventListener(
+    "pointerdown",
+    onGlobalPointerDownForColorPicker,
+    true,
+  );
 });
 
 function pageRangeToRender(total) {
-  const from = section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
-  const to = section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
+  const from =
+    section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
+  const to =
+    section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
   const fromOk = Number.isFinite(from) && from > 0;
   const toOk = Number.isFinite(to) && to > 0;
   // If only one bound is set, treat it as a single page.
@@ -1076,8 +1150,10 @@ function pageRangeToRender(total) {
 }
 
 function pagesInSectionRange() {
-  const from = section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
-  const to = section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
+  const from =
+    section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
+  const to =
+    section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
   const fromOk = Number.isFinite(from) && from > 0;
   const toOk = Number.isFinite(to) && to > 0;
   if (!fromOk && !toOk) return [];
@@ -1092,7 +1168,13 @@ function pagesInSectionRange() {
 
 function pagesToParam(pages) {
   const list = Array.isArray(pages)
-    ? [...new Set(pages.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b)
+    ? [
+        ...new Set(
+          pages
+            .map((n) => Number(n))
+            .filter((n) => Number.isFinite(n) && n > 0),
+        ),
+      ].sort((a, b) => a - b)
     : [];
   if (list.length === 0) return "";
   const ranges = [];
@@ -1116,7 +1198,8 @@ async function loadOcrForRange() {
   ocrError.value = "";
   const cid = Number(props.courseId);
   const mid = Number(section.value?.materialId);
-  if (!Number.isFinite(cid) || cid <= 0 || !Number.isFinite(mid) || mid <= 0) return;
+  if (!Number.isFinite(cid) || cid <= 0 || !Number.isFinite(mid) || mid <= 0)
+    return;
   const pages = pagesInSectionRange();
   if (pages.length === 0) return;
   if (pages.length > 30) {
@@ -1161,7 +1244,8 @@ function wordBoxPercent(word, pageInfo) {
   if (!poly.length || poly.length % 2 !== 0) return null;
   const w = Number(pageInfo?.width);
   const h = Number(pageInfo?.height);
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0)
+    return null;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -1175,7 +1259,12 @@ function wordBoxPercent(word, pageInfo) {
     maxX = Math.max(maxX, x);
     maxY = Math.max(maxY, y);
   }
-  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+  if (
+    !Number.isFinite(minX) ||
+    !Number.isFinite(minY) ||
+    !Number.isFinite(maxX) ||
+    !Number.isFinite(maxY)
+  ) {
     return null;
   }
   const left = (minX / w) * 100;
@@ -1208,7 +1297,10 @@ function updateHiddenSelectionFromHighlight() {
   if (!words.length) return;
   const a = Math.max(0, Math.min(s.from, s.to));
   const b = Math.min(words.length - 1, Math.max(s.from, s.to));
-  const picked = words.slice(a, b + 1).map((w) => String(w?.content || "").trim()).filter(Boolean);
+  const picked = words
+    .slice(a, b + 1)
+    .map((w) => String(w?.content || "").trim())
+    .filter(Boolean);
   const t = picked.join(" ").trim();
   if (!t) return;
   ta.value = t;
@@ -1223,7 +1315,11 @@ function updateHiddenSelectionFromHighlight() {
 function onWordPointerDown(pageNumber, idx, e) {
   if (!highlightEnabled.value) return;
   highlightDragging.value = true;
-  highlightSelection.value = { page: Number(pageNumber), from: Number(idx), to: Number(idx) };
+  highlightSelection.value = {
+    page: Number(pageNumber),
+    from: Number(idx),
+    to: Number(idx),
+  };
   updateHiddenSelectionFromHighlight();
   e.preventDefault();
   e.stopPropagation();
@@ -1264,7 +1360,9 @@ async function render() {
   loading.value = true;
   try {
     ensurePdfWorker();
-    const r = await apiFetch(`/api/courses/${cid}/materials/${materialId}/download`);
+    const r = await apiFetch(
+      `/api/courses/${cid}/materials/${materialId}/download`,
+    );
     if (!r.ok) {
       error.value = `Could not load PDF (HTTP ${r.status}).`;
       return;
@@ -1294,7 +1392,8 @@ async function renderActivePages() {
   const list = availablePages.value;
   if (!pdf || !list.length) return;
   const p1 = list[activeIdx.value];
-  const p2 = viewMode.value === "spread" ? (list[activeIdx.value + 1] ?? null) : null;
+  const p2 =
+    viewMode.value === "spread" ? (list[activeIdx.value + 1] ?? null) : null;
   if (!Number.isFinite(p1)) return;
 
   const key = `${p1}-${p2 ?? ""}`;
@@ -1318,7 +1417,12 @@ async function renderActivePages() {
 }
 
 watch(
-  () => [section.value?.materialId, section.value?.pagesFrom, section.value?.pagesTo, section.value?.viewMode],
+  () => [
+    section.value?.materialId,
+    section.value?.pagesFrom,
+    section.value?.pagesTo,
+    section.value?.viewMode,
+  ],
   () => {
     render();
   },
@@ -1336,9 +1440,11 @@ watch(
 onUnmounted(async () => {
   cancelled = true;
   window.removeEventListener("keydown", onKeydown);
-  window.removeEventListener("pointerdown", onGlobalPointerDownForColorPicker, true);
-  if (wheelCooldownId != null) window.clearTimeout(wheelCooldownId);
-  wheelCooldownId = null;
+  window.removeEventListener(
+    "pointerdown",
+    onGlobalPointerDownForColorPicker,
+    true,
+  );
   if (scrollCooldownId != null) window.clearTimeout(scrollCooldownId);
   scrollCooldownId = null;
 
@@ -1364,7 +1470,7 @@ onUnmounted(async () => {
 <template>
   <div
     data-dictionary-host
-    class="flex h-[calc(var(--workbook-scroll-h,100dvh)-2rem)] flex-col rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
+    class="flex min-h-0 w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
   >
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
@@ -1372,16 +1478,30 @@ onUnmounted(async () => {
           {{ docTitle }} {{ pageRangeLabel }}
         </p>
         <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-          {{ hasPdf ? "" : "Choose a PDF from Materials using the Add document button." }}
+          {{
+            hasPdf
+              ? ""
+              : "Choose a PDF from Materials using the Add document button."
+          }}
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-2">
         <button
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          :title="viewMode === 'single' ? 'Switch to 2-page view' : 'Switch to 1-page view'"
-          :aria-label="viewMode === 'single' ? 'Switch to 2-page view' : 'Switch to 1-page view'"
-          @click="section.viewMode = viewMode === 'single' ? 'spread' : 'single'"
+          :title="
+            viewMode === 'single'
+              ? 'Switch to 2-page view'
+              : 'Switch to 1-page view'
+          "
+          :aria-label="
+            viewMode === 'single'
+              ? 'Switch to 2-page view'
+              : 'Switch to 1-page view'
+          "
+          @click="
+            section.viewMode = viewMode === 'single' ? 'spread' : 'single'
+          "
         >
           <!-- Single page: vertical rectangle -->
           <svg
@@ -1396,7 +1516,9 @@ onUnmounted(async () => {
             aria-hidden="true"
           >
             <!-- A4-like page with a folded corner -->
-            <path d="M8 3h7l3 3v15a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+            <path
+              d="M8 3h7l3 3v15a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"
+            />
             <path d="M15 3v3h3" />
           </svg>
           <!-- Spread: open-book style (two rectangles sharing a side) -->
@@ -1425,7 +1547,9 @@ onUnmounted(async () => {
               : 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800'
           "
           :title="annotateEnabled ? 'Disable text notes' : 'Enable text notes'"
-          :aria-label="annotateEnabled ? 'Disable text notes' : 'Enable text notes'"
+          :aria-label="
+            annotateEnabled ? 'Disable text notes' : 'Enable text notes'
+          "
           @click="toggleAnnotations"
         >
           A
@@ -1438,8 +1562,16 @@ onUnmounted(async () => {
               ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-950/70'
               : 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800'
           "
-          :title="highlightEnabled ? 'Disable highlight mode' : 'Enable highlight mode'"
-          :aria-label="highlightEnabled ? 'Disable highlight mode' : 'Enable highlight mode'"
+          :title="
+            highlightEnabled
+              ? 'Disable highlight mode'
+              : 'Enable highlight mode'
+          "
+          :aria-label="
+            highlightEnabled
+              ? 'Disable highlight mode'
+              : 'Enable highlight mode'
+          "
           @click="toggleHighlight"
         >
           H
@@ -1453,7 +1585,9 @@ onUnmounted(async () => {
               : 'border-zinc-300 bg-white text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200'
           "
           :title="pencilTool !== 'off' ? 'Disable pencil' : 'Enable pencil'"
-          :aria-label="pencilTool !== 'off' ? 'Disable pencil' : 'Enable pencil'"
+          :aria-label="
+            pencilTool !== 'off' ? 'Disable pencil' : 'Enable pencil'
+          "
           @click="togglePencilEnabled"
         >
           <svg
@@ -1481,7 +1615,11 @@ onUnmounted(async () => {
           <button
             type="button"
             class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            :class="pencilTool === 'pen' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200' : ''"
+            :class="
+              pencilTool === 'pen'
+                ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                : ''
+            "
             title="Pen"
             aria-label="Pen"
             @click="setPencilTool('pen')"
@@ -1506,7 +1644,9 @@ onUnmounted(async () => {
             type="button"
             class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
             :class="
-              pencilTool === 'eraser' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200' : ''
+              pencilTool === 'eraser'
+                ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                : ''
             "
             title="Eraser"
             aria-label="Eraser"
@@ -1520,7 +1660,9 @@ onUnmounted(async () => {
             class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
             title="Choose color"
             aria-label="Choose color"
-            @click="openColorPicker(selectedDrawingId ? 'selected' : 'pencil', $event)"
+            @click="
+              openColorPicker(selectedDrawingId ? 'selected' : 'pencil', $event)
+            "
           >
             <span
               class="h-3 w-3 rounded-sm border border-zinc-300"
@@ -1557,7 +1699,11 @@ onUnmounted(async () => {
             class="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
             title="Delete text box"
             aria-label="Delete text box"
-            @click="selectedKind === 'note' ? removeNote(selectedNoteId) : removeDrawing(selectedDrawingId)"
+            @click="
+              selectedKind === 'note'
+                ? removeNote(selectedNoteId)
+                : removeDrawing(selectedDrawingId)
+            "
           >
             ×
           </button>
@@ -1592,8 +1738,17 @@ onUnmounted(async () => {
             +
           </button>
         </div>
-        <p v-if="availablePages.length" class="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
-          Page {{ viewMode === "single" ? String(activePageNumber ?? '-') : activePageNumbersLabel }} /
+        <p
+          v-if="availablePages.length"
+          class="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums"
+        >
+          Page
+          {{
+            viewMode === "single"
+              ? String(activePageNumber ?? "-")
+              : activePageNumbersLabel
+          }}
+          /
           {{ availablePages[availablePages.length - 1] }}
         </p>
       </div>
@@ -1607,9 +1762,19 @@ onUnmounted(async () => {
       tabindex="-1"
     />
 
-    <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-    <p v-else-if="loading" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
-    <p v-else-if="ocrLoading" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+    <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ error }}
+    </p>
+    <p
+      v-else-if="loading"
+      class="mt-3 text-sm text-zinc-500 dark:text-zinc-400"
+    >
+      Loading…
+    </p>
+    <p
+      v-else-if="ocrLoading"
+      class="mt-3 text-sm text-zinc-500 dark:text-zinc-400"
+    >
       Preparing text overlay…
     </p>
     <p v-else-if="ocrError" class="mt-3 text-sm text-red-600 dark:text-red-400">
@@ -1620,11 +1785,16 @@ onUnmounted(async () => {
       v-if="colorPickerOpen"
       data-color-picker-root
       class="fixed z-50 w-[220px] rounded-md border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-      :style="{ top: colorPickerPos.top + 'px', left: colorPickerPos.left + 'px' }"
+      :style="{
+        top: colorPickerPos.top + 'px',
+        left: colorPickerPos.left + 'px',
+      }"
       @pointerdown.stop
     >
       <div class="flex items-center justify-between gap-2">
-        <p class="text-xs font-medium text-zinc-600 dark:text-zinc-300">Color</p>
+        <p class="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+          Color
+        </p>
         <button
           type="button"
           class="rounded px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -1636,11 +1806,14 @@ onUnmounted(async () => {
       <div ref="colorPickerEl" class="mt-2" />
     </div>
 
-    <div v-if="renderedPages.length" class="mt-4 min-h-0 flex-1">
+    <div
+      v-if="renderedPages.length"
+      class="mt-4 flex h-[70vh] min-h-[420px] max-h-[900px] flex-col"
+    >
       <div
         v-if="viewMode === 'single'"
         ref="singleScrollerEl"
-        class="h-full overflow-y-auto overscroll-contain rounded-md"
+        class="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md"
         @scroll="onSingleScroll"
         @wheel="onSingleWheel"
       >
@@ -1652,7 +1825,12 @@ onUnmounted(async () => {
           :ref="(el) => setPageEl(p.page, el)"
           @click="onPageClick($event, p.page)"
         >
-          <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
+          <img
+            :src="p.dataUrl"
+            alt=""
+            class="block w-full select-none"
+            draggable="false"
+          />
 
           <!-- OCR overlay -->
           <div
@@ -1660,12 +1838,31 @@ onUnmounted(async () => {
             class="absolute inset-0"
             style="touch-action: none"
           >
-            <template v-for="(w, i) in wordsForPage(p.page)" :key="`w-${p.page}-${i}`">
+            <template
+              v-for="(w, i) in wordsForPage(p.page)"
+              :key="`w-${p.page}-${i}`"
+            >
               <span
                 v-if="wordBoxPercent(w, ocrByPage.get(p.page))"
                 class="absolute block"
-                :class="isWordSelected(p.page, i) ? 'bg-yellow-300/40' : 'bg-transparent'"
-                :style="(() => { const b = wordBoxPercent(w, ocrByPage.get(p.page)); return b ? { left: b.left + '%', top: b.top + '%', width: b.width + '%', height: b.height + '%'} : {}; })()"
+                :class="
+                  isWordSelected(p.page, i)
+                    ? 'bg-yellow-300/40'
+                    : 'bg-transparent'
+                "
+                :style="
+                  (() => {
+                    const b = wordBoxPercent(w, ocrByPage.get(p.page));
+                    return b
+                      ? {
+                          left: b.left + '%',
+                          top: b.top + '%',
+                          width: b.width + '%',
+                          height: b.height + '%',
+                        }
+                      : {};
+                  })()
+                "
                 @pointerdown="onWordPointerDown(p.page, i, $event)"
                 @pointerenter="onWordPointerEnter(p.page, i)"
               />
@@ -1676,16 +1873,21 @@ onUnmounted(async () => {
             class="absolute inset-0"
             viewBox="0 0 1000 1000"
             preserveAspectRatio="none"
-            :style="{ pointerEvents: annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none' }"
+            :style="{
+              pointerEvents:
+                annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none',
+            }"
             @pointerdown.stop.prevent="
               (e) => {
-                if (pencilTool === 'pen' || pencilTool === 'highlighter') beginStroke(p.page, pencilTool, e);
+                if (pencilTool === 'pen' || pencilTool === 'highlighter')
+                  beginStroke(p.page, pencilTool, e);
                 else if (pencilTool === 'eraser') beginErase(p.page, e);
               }
             "
             @pointermove.stop.prevent="
               (e) => {
-                if (pencilTool === 'pen' || pencilTool === 'highlighter') updateStroke(p.page, e);
+                if (pencilTool === 'pen' || pencilTool === 'highlighter')
+                  updateStroke(p.page, e);
                 else if (pencilTool === 'eraser') updateErase(p.page, e);
               }
             "
@@ -1702,13 +1904,19 @@ onUnmounted(async () => {
               }
             "
           >
-            <g v-for="d in drawings.filter((x) => Number(x.page) === p.page)" :key="d.id">
+            <g
+              v-for="d in drawings.filter((x) => Number(x.page) === p.page)"
+              :key="d.id"
+            >
               <path
                 v-if="selectedDrawingId === d.id"
                 :d="drawingPathD(d)"
                 fill="none"
                 stroke="rgb(99 102 241)"
-                :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 2px)`, opacity: 0.6 }"
+                :style="{
+                  strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 2px)`,
+                  opacity: 0.6,
+                }"
                 vector-effect="non-scaling-stroke"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -1719,7 +1927,9 @@ onUnmounted(async () => {
                 :d="drawingPathD(d)"
                 fill="none"
                 stroke="transparent"
-                :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 12px)` }"
+                :style="{
+                  strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 12px)`,
+                }"
                 vector-effect="non-scaling-stroke"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -1773,7 +1983,9 @@ onUnmounted(async () => {
                 "
                 :style="{
                   fontSize: `clamp(10px, calc(var(--page-w, 700px) * ${
-                    Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) / 100 : 0.023
+                    Number.isFinite(Number(n.fontSizePct))
+                      ? Number(n.fontSizePct) / 100
+                      : 0.023
                   }), 28px)`,
                   color: noteTextColor(n),
                 }"
@@ -1810,11 +2022,14 @@ onUnmounted(async () => {
 
       <div
         v-else
-        class="h-full overflow-auto overscroll-contain rounded-md"
+        class="min-h-0 flex-1 overflow-auto overscroll-contain rounded-md"
         ref="spreadScrollerEl"
         @wheel="onSpreadWheel"
       >
-        <div class="grid gap-3" :class="viewMode === 'spread' ? 'sm:grid-cols-2' : 'grid-cols-1'">
+        <div
+          class="grid gap-3"
+          :class="viewMode === 'spread' ? 'sm:grid-cols-2' : 'grid-cols-1'"
+        >
           <div
             v-for="p in renderedPages"
             :key="p.page"
@@ -1823,7 +2038,12 @@ onUnmounted(async () => {
             :ref="(el) => setPageEl(p.page, el)"
             @click="onPageClick($event, p.page)"
           >
-            <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
+            <img
+              :src="p.dataUrl"
+              alt=""
+              class="block w-full select-none"
+              draggable="false"
+            />
 
             <!-- OCR overlay -->
             <div
@@ -1831,148 +2051,187 @@ onUnmounted(async () => {
               class="absolute inset-0"
               style="touch-action: none"
             >
-              <template v-for="(w, i) in wordsForPage(p.page)" :key="`w-${p.page}-${i}`">
+              <template
+                v-for="(w, i) in wordsForPage(p.page)"
+                :key="`w-${p.page}-${i}`"
+              >
                 <span
                   v-if="wordBoxPercent(w, ocrByPage.get(p.page))"
                   class="absolute block"
-                  :class="isWordSelected(p.page, i) ? 'bg-yellow-300/40' : 'bg-transparent'"
-                  :style="(() => { const b = wordBoxPercent(w, ocrByPage.get(p.page)); return b ? { left: b.left + '%', top: b.top + '%', width: b.width + '%', height: b.height + '%'} : {}; })()"
+                  :class="
+                    isWordSelected(p.page, i)
+                      ? 'bg-yellow-300/40'
+                      : 'bg-transparent'
+                  "
+                  :style="
+                    (() => {
+                      const b = wordBoxPercent(w, ocrByPage.get(p.page));
+                      return b
+                        ? {
+                            left: b.left + '%',
+                            top: b.top + '%',
+                            width: b.width + '%',
+                            height: b.height + '%',
+                          }
+                        : {};
+                    })()
+                  "
                   @pointerdown="onWordPointerDown(p.page, i, $event)"
                   @pointerenter="onWordPointerEnter(p.page, i)"
                 />
               </template>
             </div>
 
-          <svg
-            class="absolute inset-0"
-            viewBox="0 0 1000 1000"
-            preserveAspectRatio="none"
-            :style="{ pointerEvents: annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none' }"
-            @pointerdown.stop.prevent="
-              (e) => {
-                if (pencilTool === 'pen' || pencilTool === 'highlighter') beginStroke(p.page, pencilTool, e);
-                else if (pencilTool === 'eraser') beginErase(p.page, e);
-              }
-            "
-            @pointermove.stop.prevent="
-              (e) => {
-                if (pencilTool === 'pen' || pencilTool === 'highlighter') updateStroke(p.page, e);
-                else if (pencilTool === 'eraser') updateErase(p.page, e);
-              }
-            "
-            @pointerup.stop.prevent="
-              () => {
-                endStroke();
-                endErase();
-              }
-            "
-            @pointercancel.stop.prevent="
-              () => {
-                endStroke();
-                endErase();
-              }
-            "
-          >
-            <g v-for="d in drawings.filter((x) => Number(x.page) === p.page)" :key="d.id">
-              <path
-                v-if="selectedDrawingId === d.id"
-                :d="drawingPathD(d)"
-                fill="none"
-                stroke="rgb(99 102 241)"
-                :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 2px)`, opacity: 0.6 }"
-                vector-effect="non-scaling-stroke"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                pointer-events="none"
-              />
-            <path
-              :d="drawingPathD(d)"
-              fill="none"
-              stroke="transparent"
-              :style="{ strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 12px)` }"
-              vector-effect="non-scaling-stroke"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              pointer-events="stroke"
+            <svg
+              class="absolute inset-0"
+              viewBox="0 0 1000 1000"
+              preserveAspectRatio="none"
+              :style="{
+                pointerEvents:
+                  annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none',
+              }"
               @pointerdown.stop.prevent="
                 (e) => {
-                  if (pencilTool === 'eraser') beginErase(p.page, e);
-                  else beginDrawingDragCandidate(p.page, d, e);
+                  if (pencilTool === 'pen' || pencilTool === 'highlighter')
+                    beginStroke(p.page, pencilTool, e);
+                  else if (pencilTool === 'eraser') beginErase(p.page, e);
                 }
               "
-            />
-              <path
-                :d="drawingPathD(d)"
-                fill="none"
-                :style="drawingStyle(d)"
-                vector-effect="non-scaling-stroke"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                data-stroke
-                @pointerdown.stop.prevent="
-                  (e) => {
-                    if (pencilTool === 'eraser') beginErase(p.page, e);
-                    else beginDrawingDragCandidate(p.page, d, e);
-                  }
-                "
-              />
-            </g>
-          </svg>
+              @pointermove.stop.prevent="
+                (e) => {
+                  if (pencilTool === 'pen' || pencilTool === 'highlighter')
+                    updateStroke(p.page, e);
+                  else if (pencilTool === 'eraser') updateErase(p.page, e);
+                }
+              "
+              @pointerup.stop.prevent="
+                () => {
+                  endStroke();
+                  endErase();
+                }
+              "
+              @pointercancel.stop.prevent="
+                () => {
+                  endStroke();
+                  endErase();
+                }
+              "
+            >
+              <g
+                v-for="d in drawings.filter((x) => Number(x.page) === p.page)"
+                :key="d.id"
+              >
+                <path
+                  v-if="selectedDrawingId === d.id"
+                  :d="drawingPathD(d)"
+                  fill="none"
+                  stroke="rgb(99 102 241)"
+                  :style="{
+                    strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 2px)`,
+                    opacity: 0.6,
+                  }"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  pointer-events="none"
+                />
+                <path
+                  :d="drawingPathD(d)"
+                  fill="none"
+                  stroke="transparent"
+                  :style="{
+                    strokeWidth: `calc(${drawingStyle(d).strokeWidth} + 12px)`,
+                  }"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  pointer-events="stroke"
+                  @pointerdown.stop.prevent="
+                    (e) => {
+                      if (pencilTool === 'eraser') beginErase(p.page, e);
+                      else beginDrawingDragCandidate(p.page, d, e);
+                    }
+                  "
+                />
+                <path
+                  :d="drawingPathD(d)"
+                  fill="none"
+                  :style="drawingStyle(d)"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  data-stroke
+                  @pointerdown.stop.prevent="
+                    (e) => {
+                      if (pencilTool === 'eraser') beginErase(p.page, e);
+                      else beginDrawingDragCandidate(p.page, d, e);
+                    }
+                  "
+                />
+              </g>
+            </svg>
 
-          <div
-            v-for="n in notes.filter((x) => Number(x.page) === p.page)"
-            :key="n.id"
-            class="absolute"
-            :style="noteStyle(n)"
-          >
-            <div class="pointer-events-auto" data-note @pointerdown.stop @click.stop style="touch-action: none">
-              <textarea
-                v-model="n.text"
-                rows="1"
-                class="w-full resize-none overflow-hidden whitespace-pre-wrap border border-dashed border-zinc-400 bg-transparent px-1.5 py-0.5 text-zinc-900 outline-none dark:border-zinc-500"
-                :readonly="editingNoteId !== n.id"
-                :class="
-                  (selectedNoteId === n.id ? 'ring-1 ring-indigo-500 ' : '') +
-                  (editingNoteId === n.id ? 'cursor-text ' : 'cursor-move ')
-                "
-                :style="{
-                  fontSize: `clamp(10px, calc(var(--page-w, 700px) * ${
-                    Number.isFinite(Number(n.fontSizePct)) ? Number(n.fontSizePct) / 100 : 0.023
-                  }), 28px)`,
-                  color: noteTextColor(n),
-                }"
-                placeholder="Type…"
-                :ref="(el) => setNoteInputEl(n.id, el)"
-                @pointerdown.capture="beginNoteDragCandidate($event, n)"
-                @pointerdown.stop="
-                  if (pencilTool !== 'off') pencilTool = 'off';
-                  annotateEnabled = true;
-                  selectedNoteId = n.id;
-                  selectedDrawingId = null;
-                "
-                @click.stop="
-                  if (pencilTool !== 'off') pencilTool = 'off';
-                  annotateEnabled = true;
-                  selectedNoteId = n.id;
-                  selectedDrawingId = null;
-                  editingNoteId = n.id;
-                "
-                @focus="
-                  if (pencilTool !== 'off') pencilTool = 'off';
-                  annotateEnabled = true;
-                  selectedNoteId = n.id;
-                  selectedDrawingId = null;
-                "
-                @input="autosizeTextarea($event.target)"
-                @keydown.enter.stop
-                @blur="onNoteBlur(n)"
-              ></textarea>
+            <div
+              v-for="n in notes.filter((x) => Number(x.page) === p.page)"
+              :key="n.id"
+              class="absolute"
+              :style="noteStyle(n)"
+            >
+              <div
+                class="pointer-events-auto"
+                data-note
+                @pointerdown.stop
+                @click.stop
+                style="touch-action: none"
+              >
+                <textarea
+                  v-model="n.text"
+                  rows="1"
+                  class="w-full resize-none overflow-hidden whitespace-pre-wrap border border-dashed border-zinc-400 bg-transparent px-1.5 py-0.5 text-zinc-900 outline-none dark:border-zinc-500"
+                  :readonly="editingNoteId !== n.id"
+                  :class="
+                    (selectedNoteId === n.id ? 'ring-1 ring-indigo-500 ' : '') +
+                    (editingNoteId === n.id ? 'cursor-text ' : 'cursor-move ')
+                  "
+                  :style="{
+                    fontSize: `clamp(10px, calc(var(--page-w, 700px) * ${
+                      Number.isFinite(Number(n.fontSizePct))
+                        ? Number(n.fontSizePct) / 100
+                        : 0.023
+                    }), 28px)`,
+                    color: noteTextColor(n),
+                  }"
+                  placeholder="Type…"
+                  :ref="(el) => setNoteInputEl(n.id, el)"
+                  @pointerdown.capture="beginNoteDragCandidate($event, n)"
+                  @pointerdown.stop="
+                    if (pencilTool !== 'off') pencilTool = 'off';
+                    annotateEnabled = true;
+                    selectedNoteId = n.id;
+                    selectedDrawingId = null;
+                  "
+                  @click.stop="
+                    if (pencilTool !== 'off') pencilTool = 'off';
+                    annotateEnabled = true;
+                    selectedNoteId = n.id;
+                    selectedDrawingId = null;
+                    editingNoteId = n.id;
+                  "
+                  @focus="
+                    if (pencilTool !== 'off') pencilTool = 'off';
+                    annotateEnabled = true;
+                    selectedNoteId = n.id;
+                    selectedDrawingId = null;
+                  "
+                  @input="autosizeTextarea($event.target)"
+                  @keydown.enter.stop
+                  @blur="onNoteBlur(n)"
+                ></textarea>
+              </div>
             </div>
-          </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 </template>
-
