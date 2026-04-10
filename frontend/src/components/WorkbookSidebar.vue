@@ -5,11 +5,11 @@ import {
   PlusIcon,
   TrashIcon,
   ChevronDownIcon,
-  EllipsisVerticalIcon,
   MagnifyingGlassIcon,
+  Cog6ToothIcon,
 } from "@heroicons/vue/20/solid";
 import { DocumentDuplicateIcon } from "@heroicons/vue/24/outline";
-import { ref, watch, nextTick, onMounted, onUnmounted } from "vue";
+import { ref, watch } from "vue";
 import SidebarProfile from "./SidebarProfile.vue";
 
 const collapsed = defineModel("collapsed", { type: Boolean, default: false });
@@ -25,7 +25,6 @@ const emit = defineEmits([
   "select",
   "new-course",
   "new-workbook",
-  "rename-course",
   "course-languages",
   "course-vocabulary",
   "course-materials",
@@ -36,97 +35,6 @@ const emit = defineEmits([
   "open-settings",
   "sign-out",
 ]);
-
-const editingCourseId = ref(null);
-const renameDraft = ref("");
-
-function renameInputId(courseId) {
-  return `course-rename-${courseId}`;
-}
-
-function focusRenameInput(courseId) {
-  nextTick(() => {
-    requestAnimationFrame(() => {
-      const el = document.getElementById(renameInputId(courseId));
-      if (el instanceof HTMLInputElement) {
-        el.focus();
-        el.select();
-      }
-    });
-  });
-}
-
-function startRename(course) {
-  editingCourseId.value = course.id;
-  renameDraft.value = course.title || "";
-  focusRenameInput(course.id);
-}
-
-function cancelRename() {
-  editingCourseId.value = null;
-  renameDraft.value = "";
-}
-
-function commitRename(courseId) {
-  if (editingCourseId.value !== courseId) return;
-  const t = renameDraft.value.trim() || "Untitled course";
-  editingCourseId.value = null;
-  renameDraft.value = "";
-  emit("rename-course", { id: courseId, title: t });
-}
-
-function onRenameBlur(courseId) {
-  if (editingCourseId.value === courseId) {
-    commitRename(courseId);
-  }
-}
-
-/** @type {import('vue').Ref<number | null>} */
-const courseMenuOpenId = ref(null);
-
-function toggleCourseMenu(courseId) {
-  courseMenuOpenId.value = courseMenuOpenId.value === courseId ? null : courseId;
-}
-
-function closeCourseMenu() {
-  courseMenuOpenId.value = null;
-}
-
-function openRenameFromMenu(course) {
-  closeCourseMenu();
-  // Wait for the menu to leave the DOM so focus isn't stolen by the closing overlay.
-  nextTick(() => startRename(course));
-}
-
-function deleteCourseFromMenu(courseId) {
-  closeCourseMenu();
-  emit("delete-course", courseId);
-}
-
-function openCourseLanguagesFromMenu(course) {
-  closeCourseMenu();
-  emit("course-languages", course);
-}
-
-function onDocumentPointerDown(e) {
-  if (!(e.target instanceof Element)) return;
-  if (e.target.closest("[data-course-menu]")) return;
-  courseMenuOpenId.value = null;
-}
-
-function onDocumentKeydown(e) {
-  if (e.key === "Escape") courseMenuOpenId.value = null;
-}
-
-onMounted(() => {
-  document.addEventListener("pointerdown", onDocumentPointerDown, true);
-  document.addEventListener("keydown", onDocumentKeydown);
-});
-
-onUnmounted(() => {
-  document.removeEventListener("pointerdown", onDocumentPointerDown, true);
-  document.removeEventListener("keydown", onDocumentKeydown);
-});
 
 /** @type {import('vue').Ref<Record<number, boolean>>} */
 const expanded = ref({});
@@ -143,12 +51,6 @@ watch(
   () => props.courses.map((c) => c.id),
   (ids) => {
     ensureExpanded(ids);
-    if (editingCourseId.value != null && !ids.includes(editingCourseId.value)) {
-      editingCourseId.value = null;
-    }
-    if (courseMenuOpenId.value != null && !ids.includes(courseMenuOpenId.value)) {
-      courseMenuOpenId.value = null;
-    }
   },
   { immediate: true },
 );
@@ -198,15 +100,6 @@ function onCollapsedNewWorkbook() {
             >
           </div>
         </div>
-        <button
-          type="button"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          aria-label="New course"
-          title="New course"
-          @click="$emit('new-course')"
-        >
-          <PlusIcon class="h-5 w-5" aria-hidden="true" />
-        </button>
       </div>
       <nav
         class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2"
@@ -244,40 +137,14 @@ function onCollapsedNewWorkbook() {
                 />
                 <ChevronRightIcon v-else class="h-4 w-4" aria-hidden="true" />
               </button>
-              <input
-                v-if="editingCourseId === course.id"
-                :id="renameInputId(course.id)"
-                v-model="renameDraft"
-                type="text"
-                class="min-w-0 flex-1 rounded border border-indigo-400 bg-white px-1.5 py-0.5 text-sm font-medium text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-indigo-500 dark:bg-zinc-950 dark:text-zinc-100"
-                aria-label="Course name"
-                @keydown.enter.prevent="commitRename(course.id)"
-                @keydown.escape.prevent="cancelRename"
-                @blur="onRenameBlur(course.id)"
-              />
               <button
-                v-else
                 type="button"
                 class="min-w-0 flex-1 truncate px-1 text-left text-sm font-medium text-zinc-800 dark:text-zinc-100"
                 :title="course.title"
-                @dblclick.prevent="startRename(course)"
               >
                 {{ course.title || "Untitled course" }}
               </button>
-              <div
-                v-if="editingCourseId === course.id"
-                class="h-8 w-8 shrink-0"
-                aria-hidden="true"
-              />
-              <div v-else class="flex shrink-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                  :aria-label="`New workbook in ${course.title || 'course'}`"
-                  @click.stop="$emit('new-workbook', course.id)"
-                >
-                  <PlusIcon class="h-4 w-4" aria-hidden="true" />
-                </button>
+              <div class="flex shrink-0 items-center gap-0.5">
                 <button
                   type="button"
                   class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
@@ -286,56 +153,31 @@ function onCollapsedNewWorkbook() {
                 >
                   <MagnifyingGlassIcon class="h-4 w-4" aria-hidden="true" />
                 </button>
-
-                <div class="relative" data-course-menu>
-                  <button
-                    type="button"
-                    class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                    :aria-expanded="courseMenuOpenId === course.id"
-                    aria-haspopup="true"
-                    :aria-label="`Course actions: ${course.title || 'Untitled course'}`"
-                    @click.stop="toggleCourseMenu(course.id)"
-                  >
-                    <EllipsisVerticalIcon class="h-4 w-4" aria-hidden="true" />
-                  </button>
-                  <div
-                    v-show="courseMenuOpenId === course.id"
-                    class="absolute right-0 top-full z-30 mt-0.5 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                    role="menu"
-                    :aria-label="`Actions for ${course.title || 'course'}`"
-                  >
-                    <button
-                      type="button"
-                      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                      role="menuitem"
-                      @click="openRenameFromMenu(course)"
-                    >
-                      Rename course
-                    </button>
-                    <button
-                      type="button"
-                      class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                      role="menuitem"
-                      @click="openCourseLanguagesFromMenu(course)"
-                    >
-                      Languages
-                    </button>
-                    <button
-                      type="button"
-                      class="flex w-full items-center gap-2 border-t border-zinc-100 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:border-zinc-800 dark:text-red-400 dark:hover:bg-red-950/40"
-                      role="menuitem"
-                      @click="deleteCourseFromMenu(course.id)"
-                    >
-                      Delete course
-                    </button>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  class="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-white hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  :aria-label="`Course settings: ${course.title || 'course'}`"
+                  @click.stop="$emit('course-languages', course)"
+                >
+                  <Cog6ToothIcon class="h-4 w-4" aria-hidden="true" />
+                </button>
               </div>
             </div>
             <ul
               v-show="expanded[course.id] !== false"
               class="flex flex-col gap-0.5 px-1 pb-1.5 pt-0.5"
             >
+              <li class="pb-0.5">
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 rounded-lg border border-dashed border-zinc-300 bg-white/60 px-2 py-1.5 pl-3 text-left text-sm text-zinc-800 transition hover:bg-white hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950/30 dark:text-zinc-200 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
+                  :aria-label="`New workbook in ${course.title || 'course'}`"
+                  @click="$emit('new-workbook', course.id)"
+                >
+                  <PlusIcon class="h-5 w-5 shrink-0" aria-hidden="true" />
+                  <span>new workbook</span>
+                </button>
+              </li>
               <li v-for="w in course.workbooks || []" :key="w.id">
                 <div
                   class="flex items-center gap-1 rounded-lg border transition"
@@ -374,7 +216,7 @@ function onCollapsedNewWorkbook() {
                 v-if="!(course.workbooks && course.workbooks.length)"
                 class="px-2 py-2 text-xs text-zinc-500 dark:text-zinc-400"
               >
-                No workbooks yet - use the ⋮ menu on the course to add one.
+                No workbooks yet - create one above.
               </li>
               <li class="px-1 pt-1">
                 <div class="border-t border-zinc-200 dark:border-zinc-800"></div>
@@ -397,12 +239,23 @@ function onCollapsedNewWorkbook() {
               </li>
             </ul>
           </li>
+          <li>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-lg border border-dashed border-zinc-300 bg-white/60 px-3 py-2.5 text-left text-sm font-semibold text-zinc-700 transition hover:bg-white hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950/30 dark:text-zinc-200 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
+              aria-label="New course"
+              @click="$emit('new-course')"
+            >
+              <PlusIcon class="h-5 w-5 shrink-0" aria-hidden="true" />
+              <span>new course</span>
+            </button>
+          </li>
         </ul>
         <p
           v-if="!courses.length"
           class="px-2 py-4 text-center text-sm text-zinc-500 dark:text-zinc-400"
         >
-          No courses yet. Use + in the header to create one.
+          No courses yet - create one below.
         </p>
       </nav>
       <SidebarProfile

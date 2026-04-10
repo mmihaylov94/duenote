@@ -163,6 +163,29 @@ async function ensureCourseMaterialsTable() {
   `);
 }
 
+async function ensureCourseMaterialOcrPagesTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS course_material_ocr_pages (
+      id SERIAL PRIMARY KEY,
+      material_id INTEGER NOT NULL REFERENCES course_materials(id) ON DELETE CASCADE,
+      page_number INTEGER NOT NULL,
+      unit TEXT,
+      width DOUBLE PRECISION,
+      height DOUBLE PRECISION,
+      ocr_json JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_course_material_ocr_pages_unique
+    ON course_material_ocr_pages (material_id, page_number);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_course_material_ocr_pages_material
+    ON course_material_ocr_pages (material_id, page_number);
+  `);
+}
+
 export async function initDatabase() {
   await ensureUsersTable();
   await ensureEmailOtpTable();
@@ -183,6 +206,7 @@ export async function initDatabase() {
   await ensureCourseVocabularyEntriesTable();
   await ensureCourseSectionPinsTable();
   await ensureCourseMaterialsTable();
+  await ensureCourseMaterialOcrPagesTable();
 
   const cfg = pgConfigFromEnv();
   const label = cfg.connectionString

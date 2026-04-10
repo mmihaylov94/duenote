@@ -47,6 +47,11 @@ export const config = {
   googleCallbackUrl:
     trim(process.env.GOOGLE_CALLBACK_URL) ||
     `${PUBLIC_API_URL.replace(/\/$/, "")}/auth/google/callback`,
+  registrationClosed: trim(process.env.REGISTRATION_CLOSED).toLowerCase() === "true",
+  azureSpeechKey: trim(process.env.AZURE_SPEECH_KEY),
+  azureSpeechRegion: trim(process.env.AZURE_SPEECH_REGION),
+  azureDocIntelEndpoint: trim(process.env.AZURE_DOCINTEL_ENDPOINT).replace(/\/$/, ""),
+  azureDocIntelKey: trim(process.env.AZURE_DOCINTEL_KEY),
   smtpHost: trim(process.env.SMTP_HOST),
   smtpPort: Number(process.env.SMTP_PORT) || 587,
   smtpSecure: process.env.SMTP_SECURE === "true",
@@ -60,7 +65,7 @@ export const config = {
   /** Directory for locally uploaded course materials (created on first upload). */
   materialsLocalDir: trim(process.env.MATERIALS_UPLOAD_DIR) || "./data/uploads/materials",
   /** Max upload size for materials (bytes). */
-  materialsMaxBytes: Math.min(Number(process.env.MATERIALS_MAX_BYTES) || 25 * 1024 * 1024, 250 * 1024 * 1024),
+  materialsMaxBytes: Math.min(Number(process.env.MATERIALS_MAX_BYTES) || 100 * 1024 * 1024, 100 * 1024 * 1024),
   /**
    * When both bucket and region are non-empty, new file uploads go to S3:
    * profile avatars and course materials. Leave either blank to keep using local dirs above.

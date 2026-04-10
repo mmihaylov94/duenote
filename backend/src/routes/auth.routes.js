@@ -284,6 +284,14 @@ authRouter.get(
     if (!googleSub || !email) {
       return res.redirect(`${config.frontendUrl}/login?error=email`);
     }
+    if (config.registrationClosed) {
+      const existing =
+        (await usersRepo.findUserByGoogleSub(googleSub)) ||
+        (await usersRepo.findUserByEmail(email));
+      if (!existing) {
+        return res.redirect(`${config.frontendUrl}/login?error=closed`);
+      }
+    }
     const displayName = profile.displayName || [profile.name?.givenName, profile.name?.familyName].filter(Boolean).join(" ");
     const avatarUrl = profile.photos?.[0]?.value || null;
     const user = await usersRepo.upsertGoogleUser({
@@ -314,6 +322,14 @@ authRouter.post(
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: "Invalid email" });
     }
+    if (config.registrationClosed) {
+      const existing = await usersRepo.findUserByEmail(String(email).trim());
+      if (!existing) {
+        return res.status(403).json({
+          error: "Registrations are currently closed. This email is not allowed.",
+        });
+      }
+    }
     const { plainCode } = await otpRepo.saveOtpChallenge(email);
     try {
       await sendOtpEmail(email.trim(), plainCode);
@@ -338,7 +354,19 @@ authRouter.post(
     if (!result.ok) {
       return res.status(401).json({ error: "Invalid or expired code" });
     }
-    const user = await usersRepo.ensureUserAfterEmailOtp(email.trim());
+    const normalizedEmail = email.trim();
+    let user = null;
+    if (config.registrationClosed) {
+      const existing = await usersRepo.findUserByEmail(normalizedEmail);
+      if (!existing) {
+        return res.status(403).json({
+          error: "Registrations are currently closed. This email is not allowed.",
+        });
+      }
+      user = await usersRepo.markEmailVerified(existing.id);
+    } else {
+      user = await usersRepo.ensureUserAfterEmailOtp(normalizedEmail);
+    }
     await regenerateSession(req);
     req.session.userId = user.id;
     res.json({ user: publicUser(user) });

@@ -53,8 +53,10 @@ const sidebarCollapsed = ref(false);
 
 /** Course object when open, or null */
 const courseLanguagesModal = ref(null);
+const courseTitleDraft = ref("");
 const courseLangDraftSource = ref("EN");
 const courseLangDraftTarget = ref("DE");
+const deleteCourseConfirmOpen = ref(false);
 
 /** Set when course vocabulary panel is open `{ id, title }` */
 const vocabularyCourse = ref(null);
@@ -365,6 +367,7 @@ function selectWorkbook(id) {
 
 function closeCourseLanguagesModal() {
   courseLanguagesModal.value = null;
+  deleteCourseConfirmOpen.value = false;
   if (removeCourseLangEsc) {
     removeCourseLangEsc();
     removeCourseLangEsc = null;
@@ -374,6 +377,7 @@ function closeCourseLanguagesModal() {
 function openCourseLanguages(course) {
   closeCourseLanguagesModal();
   courseLanguagesModal.value = course;
+  courseTitleDraft.value = course.title || "";
   courseLangDraftSource.value = course.sourceLang ?? "EN";
   courseLangDraftTarget.value = course.targetLang ?? "DE";
   const esc = (e) => {
@@ -383,14 +387,16 @@ function openCourseLanguages(course) {
   removeCourseLangEsc = () => window.removeEventListener("keydown", esc);
 }
 
-async function saveCourseLanguages() {
+async function saveCourseSettings() {
   const c = courseLanguagesModal.value;
   if (!c) return;
+  const nextTitle = courseTitleDraft.value.trim() || "Untitled course";
   let r;
   try {
     r = await apiFetch(`/api/courses/${c.id}`, {
       method: "PATCH",
       body: JSON.stringify({
+        title: nextTitle,
         sourceLang: courseLangDraftSource.value,
         targetLang: courseLangDraftTarget.value,
       }),
@@ -400,12 +406,29 @@ async function saveCourseLanguages() {
     return;
   }
   if (!r.ok) {
-    apiError.value = `Could not save languages (HTTP ${r.status}).`;
+    apiError.value = `Could not save course settings (HTTP ${r.status}).`;
     return;
   }
   apiError.value = "";
   closeCourseLanguagesModal();
   await fetchCourses();
+}
+
+function openDeleteCourseConfirm() {
+  if (!courseLanguagesModal.value) return;
+  deleteCourseConfirmOpen.value = true;
+}
+
+function closeDeleteCourseConfirm() {
+  deleteCourseConfirmOpen.value = false;
+}
+
+async function confirmDeleteCourse() {
+  const c = courseLanguagesModal.value;
+  if (!c) return;
+  const courseId = c.id;
+  closeCourseLanguagesModal();
+  await deleteCourse(courseId);
 }
 
 async function createCourse() {
@@ -433,26 +456,6 @@ async function createCourse() {
   await fetchCourses();
   currentCourseId.value = c.id;
   await createWorkbook(c.id);
-}
-
-async function renameCourse({ id, title }) {
-  clearTitleTimer();
-  let r;
-  try {
-    r = await apiFetch(`/api/courses/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ title }),
-    });
-  } catch {
-    apiError.value = `Cannot reach ${apiOriginLabel()}. Start the backend (cd backend && npm run dev).`;
-    return;
-  }
-  if (!r.ok) {
-    apiError.value = `Could not rename course (HTTP ${r.status}).`;
-    return;
-  }
-  apiError.value = "";
-  await fetchCourses();
 }
 
 async function deleteCourse(id) {
@@ -602,7 +605,6 @@ onMounted(async () => {
         @select="selectWorkbook"
         @new-course="createCourse"
         @new-workbook="createWorkbook"
-        @rename-course="renameCourse"
         @course-languages="openCourseLanguages"
         @course-vocabulary="openCourseVocabulary"
         @course-materials="openCourseMaterials"
@@ -738,18 +740,40 @@ onMounted(async () => {
           id="course-lang-dialog-title"
           class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
         >
-          Languages
+          Settings
         </h2>
         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          New workbooks in
-          <span class="font-medium text-zinc-700 dark:text-zinc-300">{{
-            courseLanguagesModal.title || "this course"
-          }}</span>
-          will start with these languages.
+          Update the course name and defaults for new workbooks.
         </p>
         <div
           class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3"
         >
+          <label
+            for="course-modal-title"
+            class="text-sm font-medium text-zinc-600 dark:text-zinc-400"
+          >
+            Name
+          </label>
+          <input
+            id="course-modal-title"
+            v-model="courseTitleDraft"
+            type="text"
+            class="w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+            :placeholder="courseLanguagesModal?.title || 'Untitled course'"
+            aria-label="Course name"
+          />
+          <div class="col-span-2 pt-2">
+            <div class="border-t border-zinc-200 dark:border-zinc-700"></div>
+            <h3
+              class="mt-3 text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+            >
+              Languages
+            </h3>
+            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              New workbooks created in this course will start with these
+              language settings.
+            </p>
+          </div>
           <label
             for="course-modal-src"
             class="text-sm font-medium text-zinc-600 dark:text-zinc-400"
@@ -792,6 +816,13 @@ onMounted(async () => {
         <div class="mt-6 flex justify-end gap-2">
           <button
             type="button"
+            class="mr-auto rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-50 dark:border-red-800/60 dark:bg-zinc-900 dark:text-red-300 dark:hover:bg-red-950/30"
+            @click="openDeleteCourseConfirm"
+          >
+            Delete course
+          </button>
+          <button
+            type="button"
             class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             @click="closeCourseLanguagesModal"
           >
@@ -800,9 +831,54 @@ onMounted(async () => {
           <button
             type="button"
             class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
-            @click="saveCourseLanguages"
+            @click="saveCourseSettings"
           >
             Save
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="courseLanguagesModal && deleteCourseConfirmOpen"
+      class="fixed inset-0 z-110 flex items-center justify-center bg-black/55 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="course-delete-dialog-title"
+      @click.self="closeDeleteCourseConfirm"
+    >
+      <div
+        class="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        @click.stop
+      >
+        <h2
+          id="course-delete-dialog-title"
+          class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+        >
+          Delete course?
+        </h2>
+        <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+          Are you sure you want to delete
+          <span class="font-semibold text-zinc-900 dark:text-zinc-100">{{
+            courseLanguagesModal?.title || "this course"
+          }}</span
+          >? This will delete all related workbooks and materials. This action
+          cannot be undone.
+        </p>
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            @click="closeDeleteCourseConfirm"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500"
+            @click="confirmDeleteCourse"
+          >
+            Delete course
           </button>
         </div>
       </div>

@@ -32,6 +32,7 @@ const editingNoteId = ref(null);
 /** Selected drawing (move mode) */
 const selectedDrawingId = ref(null);
 const annotateEnabled = ref(false);
+const highlightEnabled = ref(false);
 /** @type {import('vue').Ref<'off'|'pen'|'highlighter'|'eraser'>} */
 const pencilTool = ref("off");
 const pencilColor = ref("#0a0a0a"); // default for new strokes
@@ -46,6 +47,15 @@ const colorPickerEl = ref(null);
 const colorPickerPos = ref({ top: 0, left: 0 });
 const colorPickerPlacement = ref("bottom"); // bottom | top
 let iroPicker = null;
+
+const ocrLoading = ref(false);
+const ocrError = ref("");
+/** @type {import('vue').Ref<Map<number, { unit?: string|null, width?: number|null, height?: number|null, ocr?: any }>>} */
+const ocrByPage = ref(new Map());
+const ocrSelectionTa = ref(null);
+/** @type {import('vue').Ref<{ page: number, from: number, to: number } | null>} */
+const highlightSelection = ref(null);
+const highlightDragging = ref(false);
 
 function getPageElByNumber(pageNumber) {
   const p = Number(pageNumber);
@@ -72,6 +82,20 @@ function toggleAnnotations() {
   if (annotateEnabled.value) {
     // Switching to annotations disables pencil mode.
     pencilTool.value = "off";
+    highlightEnabled.value = false;
+  }
+}
+
+function toggleHighlight() {
+  highlightEnabled.value = !highlightEnabled.value;
+  if (highlightEnabled.value) {
+    annotateEnabled.value = false;
+    pencilTool.value = "off";
+    selectedNoteId.value = null;
+    editingNoteId.value = null;
+    selectedDrawingId.value = null;
+  } else {
+    highlightSelection.value = null;
   }
 }
 
@@ -1051,6 +1075,176 @@ function pageRangeToRender(total) {
   return pages;
 }
 
+function pagesInSectionRange() {
+  const from = section.value?.pagesFrom != null ? Number(section.value.pagesFrom) : null;
+  const to = section.value?.pagesTo != null ? Number(section.value.pagesTo) : null;
+  const fromOk = Number.isFinite(from) && from > 0;
+  const toOk = Number.isFinite(to) && to > 0;
+  if (!fromOk && !toOk) return [];
+  const start = fromOk ? from : to;
+  const end = toOk ? to : from;
+  const lo = Math.min(start, end);
+  const hi = Math.max(start, end);
+  const out = [];
+  for (let p = lo; p <= hi; p += 1) out.push(p);
+  return out;
+}
+
+function pagesToParam(pages) {
+  const list = Array.isArray(pages)
+    ? [...new Set(pages.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b)
+    : [];
+  if (list.length === 0) return "";
+  const ranges = [];
+  let start = list[0];
+  let prev = list[0];
+  for (let i = 1; i < list.length; i += 1) {
+    const cur = list[i];
+    if (cur === prev + 1) {
+      prev = cur;
+      continue;
+    }
+    ranges.push(start === prev ? String(start) : `${start}-${prev}`);
+    start = cur;
+    prev = cur;
+  }
+  ranges.push(start === prev ? String(start) : `${start}-${prev}`);
+  return ranges.join(",");
+}
+
+async function loadOcrForRange() {
+  ocrError.value = "";
+  const cid = Number(props.courseId);
+  const mid = Number(section.value?.materialId);
+  if (!Number.isFinite(cid) || cid <= 0 || !Number.isFinite(mid) || mid <= 0) return;
+  const pages = pagesInSectionRange();
+  if (pages.length === 0) return;
+  if (pages.length > 30) {
+    ocrError.value = "Text overlay supports up to 30 pages per section.";
+    return;
+  }
+  ocrLoading.value = true;
+  try {
+    // Ensure OCR exists (backend is cached per material+page).
+    await apiFetch(`/api/courses/${cid}/materials/${mid}/ocr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pages: pagesToParam(pages) }),
+    });
+
+    const r = await apiFetch(
+      `/api/courses/${cid}/materials/${mid}/ocr?pages=${encodeURIComponent(pagesToParam(pages))}`,
+    );
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      ocrError.value = j.error || `Could not load OCR (HTTP ${r.status}).`;
+      return;
+    }
+    const data = await r.json().catch(() => ({}));
+    const list = Array.isArray(data.pages) ? data.pages : [];
+    const next = new Map(ocrByPage.value);
+    for (const p of list) {
+      const pn = Number(p.pageNumber);
+      if (!Number.isFinite(pn) || pn <= 0) continue;
+      next.set(pn, p);
+    }
+    ocrByPage.value = next;
+  } catch {
+    ocrError.value = "Cannot reach the server for OCR.";
+  } finally {
+    ocrLoading.value = false;
+  }
+}
+
+function wordBoxPercent(word, pageInfo) {
+  const poly = Array.isArray(word?.polygon) ? word.polygon : [];
+  if (!poly.length || poly.length % 2 !== 0) return null;
+  const w = Number(pageInfo?.width);
+  const h = Number(pageInfo?.height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < poly.length; i += 2) {
+    const x = Number(poly[i]);
+    const y = Number(poly[i + 1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+  const left = (minX / w) * 100;
+  const top = (minY / h) * 100;
+  const width = ((maxX - minX) / w) * 100;
+  const height = ((maxY - minY) / h) * 100;
+  return { left, top, width, height };
+}
+
+function wordsForPage(pageNumber) {
+  const entry = ocrByPage.value.get(Number(pageNumber));
+  const words = entry?.ocr?.words;
+  return Array.isArray(words) ? words : [];
+}
+
+function isWordSelected(pageNumber, idx) {
+  const s = highlightSelection.value;
+  if (!s) return false;
+  if (Number(s.page) !== Number(pageNumber)) return false;
+  const a = Math.min(s.from, s.to);
+  const b = Math.max(s.from, s.to);
+  return idx >= a && idx <= b;
+}
+
+function updateHiddenSelectionFromHighlight() {
+  const s = highlightSelection.value;
+  const ta = ocrSelectionTa.value;
+  if (!s || !(ta instanceof HTMLTextAreaElement)) return;
+  const words = wordsForPage(s.page);
+  if (!words.length) return;
+  const a = Math.max(0, Math.min(s.from, s.to));
+  const b = Math.min(words.length - 1, Math.max(s.from, s.to));
+  const picked = words.slice(a, b + 1).map((w) => String(w?.content || "").trim()).filter(Boolean);
+  const t = picked.join(" ").trim();
+  if (!t) return;
+  ta.value = t;
+  ta.focus();
+  try {
+    ta.setSelectionRange(0, t.length);
+  } catch {
+    /* ignore */
+  }
+}
+
+function onWordPointerDown(pageNumber, idx, e) {
+  if (!highlightEnabled.value) return;
+  highlightDragging.value = true;
+  highlightSelection.value = { page: Number(pageNumber), from: Number(idx), to: Number(idx) };
+  updateHiddenSelectionFromHighlight();
+  e.preventDefault();
+  e.stopPropagation();
+  window.addEventListener("pointerup", endHighlightDrag, true);
+}
+
+function onWordPointerEnter(pageNumber, idx) {
+  if (!highlightEnabled.value) return;
+  if (!highlightDragging.value) return;
+  const s = highlightSelection.value;
+  if (!s || Number(s.page) !== Number(pageNumber)) return;
+  s.to = Number(idx);
+  highlightSelection.value = { ...s };
+  updateHiddenSelectionFromHighlight();
+}
+
+function endHighlightDrag() {
+  highlightDragging.value = false;
+  window.removeEventListener("pointerup", endHighlightDrag, true);
+}
+
 async function render() {
   error.value = "";
   renderedPages.value = [];
@@ -1085,6 +1279,7 @@ async function render() {
     numPages.value = pdf.numPages;
     activeIdx.value = 0;
     await renderActivePages();
+    loadOcrForRange();
   } catch (e) {
     if (cancelled) return;
     error.value = e?.message || "Could not render PDF.";
@@ -1168,6 +1363,7 @@ onUnmounted(async () => {
 
 <template>
   <div
+    data-dictionary-host
     class="flex h-[calc(var(--workbook-scroll-h,100dvh)-2rem)] flex-col rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
   >
     <div class="flex items-start justify-between gap-3">
@@ -1233,6 +1429,20 @@ onUnmounted(async () => {
           @click="toggleAnnotations"
         >
           A
+        </button>
+        <button
+          type="button"
+          class="flex h-7 w-7 items-center justify-center rounded-md border text-sm font-semibold shadow-sm"
+          :class="
+            highlightEnabled
+              ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-950/70'
+              : 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800'
+          "
+          :title="highlightEnabled ? 'Disable highlight mode' : 'Enable highlight mode'"
+          :aria-label="highlightEnabled ? 'Disable highlight mode' : 'Enable highlight mode'"
+          @click="toggleHighlight"
+        >
+          H
         </button>
         <button
           type="button"
@@ -1389,8 +1599,22 @@ onUnmounted(async () => {
       </div>
     </div>
 
+    <textarea
+      ref="ocrSelectionTa"
+      class="sr-only"
+      data-tts-lang="sourceLang"
+      aria-hidden="true"
+      tabindex="-1"
+    />
+
     <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     <p v-else-if="loading" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+    <p v-else-if="ocrLoading" class="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+      Preparing text overlay…
+    </p>
+    <p v-else-if="ocrError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ ocrError }}
+    </p>
 
     <div
       v-if="colorPickerOpen"
@@ -1429,6 +1653,24 @@ onUnmounted(async () => {
           @click="onPageClick($event, p.page)"
         >
           <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
+
+          <!-- OCR overlay -->
+          <div
+            v-if="highlightEnabled"
+            class="absolute inset-0"
+            style="touch-action: none"
+          >
+            <template v-for="(w, i) in wordsForPage(p.page)" :key="`w-${p.page}-${i}`">
+              <span
+                v-if="wordBoxPercent(w, ocrByPage.get(p.page))"
+                class="absolute block"
+                :class="isWordSelected(p.page, i) ? 'bg-yellow-300/40' : 'bg-transparent'"
+                :style="(() => { const b = wordBoxPercent(w, ocrByPage.get(p.page)); return b ? { left: b.left + '%', top: b.top + '%', width: b.width + '%', height: b.height + '%'} : {}; })()"
+                @pointerdown="onWordPointerDown(p.page, i, $event)"
+                @pointerenter="onWordPointerEnter(p.page, i)"
+              />
+            </template>
+          </div>
 
           <svg
             class="absolute inset-0"
@@ -1582,6 +1824,24 @@ onUnmounted(async () => {
             @click="onPageClick($event, p.page)"
           >
             <img :src="p.dataUrl" alt="" class="block w-full select-none" draggable="false" />
+
+            <!-- OCR overlay -->
+            <div
+              v-if="highlightEnabled"
+              class="absolute inset-0"
+              style="touch-action: none"
+            >
+              <template v-for="(w, i) in wordsForPage(p.page)" :key="`w-${p.page}-${i}`">
+                <span
+                  v-if="wordBoxPercent(w, ocrByPage.get(p.page))"
+                  class="absolute block"
+                  :class="isWordSelected(p.page, i) ? 'bg-yellow-300/40' : 'bg-transparent'"
+                  :style="(() => { const b = wordBoxPercent(w, ocrByPage.get(p.page)); return b ? { left: b.left + '%', top: b.top + '%', width: b.width + '%', height: b.height + '%'} : {}; })()"
+                  @pointerdown="onWordPointerDown(p.page, i, $event)"
+                  @pointerenter="onWordPointerEnter(p.page, i)"
+                />
+              </template>
+            </div>
 
           <svg
             class="absolute inset-0"

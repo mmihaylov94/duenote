@@ -9,6 +9,7 @@ import { pool } from "./db/pool.js";
 import { coursesRouter } from "./routes/courses.routes.js";
 import { workbooksRouter } from "./routes/workbooks.routes.js";
 import { translateRouter } from "./routes/translate.routes.js";
+import { ttsRouter } from "./routes/tts.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { mediaRouter } from "./routes/media.routes.js";
 import { notFoundHandler } from "./middleware/notFound.js";
@@ -71,6 +72,7 @@ export function createApp() {
   app.use("/api/courses", coursesRouter);
   app.use("/api/workbooks", workbooksRouter);
   app.use("/api/translate", translateRouter);
+  app.use("/api/tts", ttsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

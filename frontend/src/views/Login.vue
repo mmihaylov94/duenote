@@ -62,6 +62,8 @@ onMounted(() => {
     error.value = "Could not read your email from Google.";
   } else if (q === "config") {
     error.value = "Google sign-in is not configured on the server.";
+  } else if (q === "closed") {
+    error.value = "Registrations are currently closed for this app.";
   }
 });
 

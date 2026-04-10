@@ -19,5 +19,10 @@ export function errorHandler(err, req, res, next) {
   }
 
   const body = { error: status === 500 ? "Internal Server Error" : message };
+  if (!config.isProd && err && typeof err === "object") {
+    if (Object.prototype.hasOwnProperty.call(err, "detail")) {
+      body.detail = err.detail;
+    }
+  }
   res.status(status).json(body);
 }

@@ -3,29 +3,69 @@
 DueNote is a language-learning notebook for people who want to study from real content (articles, videos, notes) and keep everything organized.
 
 - **For non‑technical readers**: Create a course (e.g. “German”), then create workbooks inside it. Each workbook is made of sections (title, translations, grammar notes, vocabulary lists, and embedded videos). The app auto-saves as you type.
-- **For technical readers**: Vue 3 SPA + Node/Express API + PostgreSQL. Authentication uses server-side sessions (PostgreSQL-backed). Translation calls a backend DeepL proxy.
+- **For technical readers**: Vue 3 SPA + Node/Express API + PostgreSQL. Authentication uses server-side sessions (PostgreSQL-backed). Translation calls a backend DeepL proxy. OCR uses Azure Document Intelligence and text-to-speech uses Azure Speech.
 
 ---
+
+## Feature checklist (quick scan)
+
+### Learning workflow
+
+- **Courses + workbooks** (auto-save, reorderable sections)
+- **Sections**: Header, Translation, Vocabulary, Grammar (rich text), Video (YouTube), Document (PDF)
+- **Highlight actions**: Add to dictionary (DeepL) + Read aloud (TTS)
+- **Course vocabulary view**: aggregated vocabulary across all workbooks
+
+### Documents (PDF)
+
+- **PDF materials** attached to courses (local disk or S3)
+- **Annotations**: notes and drawings on pages
+- **OCR highlight mode**: selectable invisible text overlay (cached per page)
+
+### Auth & safety
+
+- **Sessions** stored in PostgreSQL (cookie-based)
+- **Sign-in**: Google OAuth (optional) + Email OTP (SMTP)
+- **Registration lock**: `REGISTRATION_CLOSED=true` to allow only existing emails
+- **Rate limits** on auth and TTS endpoints
+
+### Tech & services
+
+- **Frontend**: Vue 3 + Vite + Tailwind + Heroicons
+- **Backend**: Node.js (ESM) + Express + PostgreSQL
+- **Translation**: DeepL (`DEEPL_AUTH_KEY`)
+- **Text-to-speech**: Azure Speech (`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`)
+- **OCR**: Azure Document Intelligence (`AZURE_DOCINTEL_ENDPOINT`, `AZURE_DOCINTEL_KEY`)
 
 ## What it does (non‑technical overview)
 
 ### Organize learning into courses and workbooks
+
 - **Courses**: one per language/topic.
 - **Workbooks**: one per lesson/article/video. A workbook is a page made of blocks you can reorder.
 
 ### Build workbooks from sections
+
 Workbooks support multiple section types:
+
 - **Header**: a title (also used as the workbook name).
 - **Translation**: side-by-side text with a source/target language.
 - **Vocabulary**: word + meaning rows.
 - **Grammar**: rich notes (formatting, lists, highlights).
 - **Video**: embed a YouTube video (added via URL; immutable once created).
+- **Document**: render a PDF page range from course materials, with annotations and optional “highlight mode” for selectable OCR text.
 
 ### Create vocabulary as you read
+
 - Highlight text in Header / Translation / Grammar and click **Add to dictionary**.
 - DueNote translates the highlighted text via DeepL and adds it to your workbook’s vocabulary.
 
+### Read selected text aloud (TTS)
+
+Highlight text in workbook sections and click the **speaker** button to read it aloud (Azure Speech).
+
 ### View all vocabulary for a course
+
 A course has a combined **Vocabulary** view that aggregates words from all workbooks.
 
 ---
@@ -33,6 +73,7 @@ A course has a combined **Vocabulary** view that aggregates words from all workb
 ## Key behaviors (important details)
 
 ### Vocabulary editing rules
+
 - **Edit meaning**: updates the shared meaning for that entry (debounced PATCH).
 - **Edit word**:
   - If the entry appears in **multiple rows** in the workbook, editing the word **forks** (creates/links a new entry for just that row).
@@ -40,6 +81,7 @@ A course has a combined **Vocabulary** view that aggregates words from all workb
 - **Remove row**: if an entry has no remaining references in any workbook (in the course), it is deleted from the course vocabulary table; otherwise only the row reference is removed.
 
 ### Video sections are immutable
+
 When adding a Video section you paste a YouTube link in a modal. After creation the section shows only the video and cannot be edited; to change it, remove the section and add a new Video section.
 
 ---
@@ -50,7 +92,9 @@ When adding a Video section you paste a YouTube link in a modal. After creation 
 - **Google OAuth** (optional): “Continue with Google”. Requires Google client credentials + callback URL configuration.
 - **Email OTP** (optional in dev, recommended in production): passwordless sign-in via email codes. Requires SMTP in production.
 - **PostgreSQL**: all app data + session storage.
-- **S3 (optional)**: profile avatar uploads can be stored on local disk or S3 (see `backend/.env.example`).
+- **S3 (optional)**: profile avatars and course materials can be stored on local disk or S3 (see `backend/.env.example`).
+- **Azure AI Speech**: used by `POST /api/tts` to synthesize speech (requires `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION`).
+- **Azure AI Document Intelligence**: used to OCR PDFs for “highlight mode” (requires `AZURE_DOCINTEL_ENDPOINT` + `AZURE_DOCINTEL_KEY`).
 
 ---
 
@@ -60,7 +104,7 @@ When adding a Video section you paste a YouTube link in a modal. After creation 
 
 - **Courses** - Top-level groups (e.g. “Italian”, “German”). Each course has a title and default **source** / **destination** languages for new workbooks.
 - **Workbooks** - Belong to exactly one course. Titles derive from the first header line; content is stored as structured **sections** in JSON.
-- **Sidebar** - Tree of courses (expand/collapse) with workbooks inside. Actions per course: rename, **Languages** (modal), **Vocabulary** (aggregated view), new workbook, delete course. Per workbook: open, duplicate, delete.
+- **Sidebar** - Tree of courses (expand/collapse) with workbooks inside. Actions per course: **Settings** (rename + languages + delete w/ confirmation), **Vocabulary** (aggregated view), new workbook. Per workbook: open, duplicate, delete.
 
 ### Workbook content (sections)
 
@@ -71,6 +115,7 @@ Workbooks are a list of sections (see **TranslatorView**). Types include:
 - **Vocabulary** - Table rows (`word` / `meaning`); multiple vocabulary blocks per workbook.
 - **Grammar** - Rich-text notes (Quill).
 - **Video** - YouTube embed section (added via a URL modal; immutable once created).
+- **Document** - PDF page rendering from course materials (single page or spread), with notes/drawings and optional OCR highlight overlay.
 
 Content **auto-saves** (debounced) to the API when the user edits.
 
@@ -104,6 +149,20 @@ In header / translation / grammar sections, selecting text shows an **Add to dic
 - Creates/links a vocabulary entry in the course
 - Adds it to the workbook’s first vocabulary section (or creates one if missing)
 
+### Text-to-speech (TTS) from highlights
+
+Selecting text in workbook sections shows a small floating action menu with a **speaker** icon. Clicking it:
+
+- Calls **Azure Speech** via `POST /api/tts`
+- Uses language hints from the selected area (e.g. “source” vs “target” side of a translation)
+
+### Documents: OCR highlight overlay
+
+Document sections can enable a “highlight mode” that renders an invisible, selectable text overlay on top of the PDF pages:
+
+- OCR is produced by **Azure Document Intelligence** (prebuilt-read) and cached per material page in PostgreSQL
+- The overlay enables selecting/copying text from PDF scans and sending that text to the same floating actions (dictionary / TTS)
+
 ### Translation & DeepL
 
 - Translation sections can call the backend **`POST /api/translate`**, which forwards to **DeepL** using the server-side API key.
@@ -129,14 +188,14 @@ Base URL is the backend origin (e.g. `http://localhost:3000`). **`GET /health`**
 
 ### Auth
 
-| Method | Path                        | Description                                                     |
-| ------ | --------------------------- | --------------------------------------------------------------- |
-| GET    | `/api/auth/me`              | Current user `{ id, email, displayName, avatarUrl }` or **401** |
-| POST   | `/api/auth/logout`          | Destroy session (**204**)                                       |
-| GET    | `/auth/google` or `/api/auth/google` | Start Google OAuth (redirect)                                   |
+| Method | Path                                                   | Description                                                                        |
+| ------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| GET    | `/api/auth/me`                                         | Current user `{ id, email, displayName, avatarUrl }` or **401**                    |
+| POST   | `/api/auth/logout`                                     | Destroy session (**204**)                                                          |
+| GET    | `/auth/google` or `/api/auth/google`                   | Start Google OAuth (redirect)                                                      |
 | GET    | `/auth/google/callback` or `/api/auth/google/callback` | OAuth callback (must match `GOOGLE_CALLBACK_URL`; redirects to `FRONTEND_URL/app`) |
-| POST   | `/api/auth/email/request`   | Body `{ email }` - sends OTP (rate-limited)                     |
-| POST   | `/api/auth/email/verify`    | Body `{ email, code }` - creates session                        |
+| POST   | `/api/auth/email/request`                              | Body `{ email }` - sends OTP (rate-limited)                                        |
+| POST   | `/api/auth/email/verify`                               | Body `{ email, code }` - creates session                                           |
 
 ### Courses
 
@@ -165,6 +224,19 @@ Base URL is the backend origin (e.g. `http://localhost:3000`). **`GET /health`**
 | ------ | ---------------- | ------------------------------------------------------------------------------ |
 | POST   | `/api/translate` | Auth required. Body: `text`, `sourceLang`, `targetLang` → `{ translatedText }` |
 
+### Text-to-speech (Azure Speech)
+
+| Method | Path       | Description                                        |
+| ------ | ---------- | -------------------------------------------------- |
+| POST   | `/api/tts` | Auth required. Body: `text`, `lang` → `audio/mpeg` |
+
+### OCR (Azure Document Intelligence)
+
+| Method | Path                                         | Description                                                                           |
+| ------ | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| GET    | `/api/courses/:id/materials/:materialId/ocr` | Auth required. Query: `pages=1-3,5` → cached OCR for pages                            |
+| POST   | `/api/courses/:id/materials/:materialId/ocr` | Auth required. Body: `{ pages: "1-3,5" }` → ensure OCR exists (creates missing pages) |
+
 ---
 
 ## Technology Stack
@@ -181,6 +253,7 @@ Base URL is the backend origin (e.g. `http://localhost:3000`). **`GET /health`**
 - **dotenv** - Environment variables
 - **cors** - Cross-origin requests (with credentials when needed)
 - **helmet** - Security headers in production
+- **pdf-lib** - PDF page extraction (used for OCR requests to keep payloads small)
 
 ### Frontend
 
@@ -216,6 +289,16 @@ Base URL is the backend origin (e.g. `http://localhost:3000`). **`GET /health`**
 - Required for all app data.
 - Connection via **`DATABASE_URL`** or discrete **`DATABASE_*`** / **`PG*`** variables (see backend `.env.example`).
 
+### Azure AI Speech (TTS)
+
+- Used for `POST /api/tts` (returns `audio/mpeg`).
+- Requires `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` in `backend/.env`.
+
+### Azure AI Document Intelligence (OCR)
+
+- Used to OCR PDFs and create an invisible selectable overlay in Document sections (highlight mode).
+- Requires `AZURE_DOCINTEL_ENDPOINT` and `AZURE_DOCINTEL_KEY` in `backend/.env`.
+
 ---
 
 ## Project Structure (overview)
@@ -228,8 +311,8 @@ duenote/
 │   ├── app.js             # Express app, session, CORS, route mounts
 │   ├── config.js          # Environment-driven config
 │   ├── db/                # Pool, init/migrations, repositories
-│   ├── routes/            # auth, courses, workbooks, translate
-│   ├── services/          # DeepL, email
+│   ├── routes/            # auth, courses, workbooks, translate, tts
+│   ├── services/          # DeepL, email, OCR (Document Intelligence)
 │   ├── middleware/        # async handler, errors, 404, requireAuth
 │   └── utils/             # Language helpers
 │   package.json
@@ -287,22 +370,25 @@ duenote/
 
 Copy **`backend/.env.example`** to **`backend/.env`** and set:
 
-| Variable                                    | Purpose                                                                |
-| ------------------------------------------- | ---------------------------------------------------------------------- |
-| `DATABASE_URL` or `DATABASE_*` / `PG*`      | PostgreSQL connection                                                  |
-| `SESSION_SECRET`                            | **Required in production** (32+ random chars); signs session cookies   |
-| `FRONTEND_URL`                              | Browser app URL for OAuth redirect (e.g. `https://app.example.com`)    |
-| `PUBLIC_API_URL`                            | Public API base URL (used for Google callback default)                 |
-| `COOKIE_SECURE`                             | `true` in production behind HTTPS (default when `NODE_ENV=production`) |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth (optional)                                                |
-| `GOOGLE_CALLBACK_URL`                       | Full callback URL if not `{PUBLIC_API_URL}/auth/google/callback` (must match Google Console) |
-| `SMTP_*`                                    | SMTP for email OTP; in production, required for email sign-in          |
-| `DEEPL_AUTH_KEY`                            | DeepL API key (required for translation)                               |
-| `DEEPL_API_URL`                             | Optional; default free-tier DeepL URL                                  |
-| `PORT`                                      | API port (default `3000`)                                              |
-| `NODE_ENV`                                  | `production` enables stricter logging and Helmet                       |
-| `CORS_ORIGIN`                               | Comma-separated allowed origins when using cross-origin SPA + cookies  |
-| `JSON_LIMIT`                                | Optional; max JSON body size (default `2mb`)                           |
+| Variable                                         | Purpose                                                                                      |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `DATABASE_URL` or `DATABASE_*` / `PG*`           | PostgreSQL connection                                                                        |
+| `SESSION_SECRET`                                 | **Required in production** (32+ random chars); signs session cookies                         |
+| `FRONTEND_URL`                                   | Browser app URL for OAuth redirect (e.g. `https://app.example.com`)                          |
+| `PUBLIC_API_URL`                                 | Public API base URL (used for Google callback default)                                       |
+| `COOKIE_SECURE`                                  | `true` in production behind HTTPS (default when `NODE_ENV=production`)                       |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`      | Google OAuth (optional)                                                                      |
+| `GOOGLE_CALLBACK_URL`                            | Full callback URL if not `{PUBLIC_API_URL}/auth/google/callback` (must match Google Console) |
+| `SMTP_*`                                         | SMTP for email OTP; in production, required for email sign-in                                |
+| `DEEPL_AUTH_KEY`                                 | DeepL API key (required for translation)                                                     |
+| `DEEPL_API_URL`                                  | Optional; default free-tier DeepL URL                                                        |
+| `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION`       | Azure Speech (required for TTS)                                                              |
+| `AZURE_DOCINTEL_ENDPOINT` / `AZURE_DOCINTEL_KEY` | Azure Document Intelligence (required for OCR highlight mode)                                |
+| `REGISTRATION_CLOSED`                            | Optional; when `true` only existing emails can sign in                                       |
+| `PORT`                                           | API port (default `3000`)                                                                    |
+| `NODE_ENV`                                       | `production` enables stricter logging and Helmet                                             |
+| `CORS_ORIGIN`                                    | Comma-separated allowed origins when using cross-origin SPA + cookies                        |
+| `JSON_LIMIT`                                     | Optional; max JSON body size (default `2mb`)                                                 |
 
 ### Frontend
 
@@ -386,26 +472,32 @@ Serve the **`frontend/dist`** static files with any static host or reverse proxy
 ## Deployment guide (AWS EC2)
 
 This is a practical “single VM” deployment pattern:
+
 - **Nginx** serves the frontend and proxies `/api` to the backend
 - **Backend** runs as a **systemd** service
 - **PostgreSQL** runs on **RDS** (recommended) or locally on the instance
 
 ### Architecture (recommended)
+
 - **Frontend**: `https://yourdomain.com/` (static files)
 - **API**: `https://yourdomain.com/api/*` (same domain → simpler cookie/session behavior)
 
 ### Step-by-step (Ubuntu 22.04 example)
 
-1) **Provision**
+1. **Provision**
+
 - EC2 instance + security group allowing inbound **80/443** and **22**.
 
-2) **Install packages**
+2. **Install packages**
+
 - Node.js 18+, nginx, and optionally PostgreSQL (skip if using RDS).
 
-3) **Deploy code**
+3. **Deploy code**
+
 - Clone the repository to e.g. `/opt/duenote`.
 
-4) **Configure backend**
+4. **Configure backend**
+
 - Copy `backend/.env.example` → `backend/.env`.
 - Minimum production values:
   - `NODE_ENV=production`
@@ -417,7 +509,7 @@ This is a practical “single VM” deployment pattern:
   - `DEEPL_AUTH_KEY=...`
   - SMTP vars if you want email OTP in production
 
-5) **Build frontend**
+5. **Build frontend**
 
 ```bash
 cd frontend
@@ -427,28 +519,34 @@ npm run build
 
 Copy `frontend/dist` to a web directory, e.g. `/var/www/duenote/`.
 
-6) **Run backend with systemd**
+6. **Run backend with systemd**
+
 - Create a service that runs `npm ci` (once) and `npm start` in `backend/`.
 - Ensure it loads environment from `backend/.env` (or equivalent).
 
-7) **Nginx**
+7. **Nginx**
+
 - Serve `/var/www/duenote` at `/`
 - Proxy `/api/` to the backend (e.g. `http://127.0.0.1:3000`)
 - **SPA fallback is required** so routes like `/app` return `index.html` (Vue Router history mode)
 
 An example config is included in this repo:
-- `deploy/nginx/duenote.conf`
 
-8) **HTTPS**
+- `frontend/nginx.conf`
+
+8. **HTTPS**
+
 - Use Let’s Encrypt (certbot) or your preferred method.
 - Keep `COOKIE_SECURE=true` behind HTTPS.
 
-9) **Verify**
+9. **Verify**
+
 - `GET /health` returns `{ ok: true, env: "production" }`
 - Login works (Google and/or email OTP)
 - Translation works (DeepL key set)
 
 ### Why `/app` must be handled by nginx
+
 Google OAuth redirects to `${FRONTEND_URL}/app` after sign-in. `/app` is a **client-side route** (Vue Router) and not a physical file. Your web server must serve `index.html` for `/app` via an SPA fallback like:
 
 ```
@@ -458,11 +556,6 @@ try_files $uri $uri/ /index.html;
 Without that line, `/app` will 404 in production.
 
 ---
-
-## Git / repo hygiene
-
-- Do **not** commit: `.env`, `node_modules/`, build output, logs, local uploads under `data/uploads/`.
-- The repo includes `.env.example` templates under `backend/` and `frontend/`.
 
 ## Security notes
 

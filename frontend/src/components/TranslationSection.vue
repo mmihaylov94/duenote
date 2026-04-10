@@ -306,6 +306,8 @@ function onRightInput(e) {
 <template>
   <div
     data-dictionary-host
+    :data-tts-source-lang="props.sourceLang"
+    :data-tts-target-lang="props.targetLang"
     class="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
   >
     <div class="p-3">
@@ -319,6 +321,7 @@ function onRightInput(e) {
         <div class="flex min-h-0 flex-col gap-2">
           <textarea
             ref="leftTa"
+            data-tts-lang="sourceLang"
             v-model="section.sourceText"
             class="min-h-30 w-full resize-none overflow-hidden rounded-md border border-zinc-300 bg-white p-3 font-sans text-base leading-relaxed shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 field-sizing-content"
             placeholder="Type here…"
@@ -332,6 +335,8 @@ function onRightInput(e) {
         <div class="flex min-h-0 flex-col gap-2">
           <textarea
             ref="rightTa"
+            data-tts-lang="targetLang"
+            data-disable-dictionary
             v-model="section.translationText"
             class="min-h-30 w-full resize-none overflow-hidden rounded-md border border-zinc-300 bg-white p-3 font-sans text-base leading-relaxed shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 field-sizing-content"
             placeholder="Translation appears here…"

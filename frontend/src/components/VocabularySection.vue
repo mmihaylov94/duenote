@@ -7,6 +7,8 @@ const section = defineModel({ type: Object, required: true });
 
 const props = defineProps({
   courseId: { type: Number, required: true },
+  sourceLang: { type: String, default: "EN" },
+  targetLang: { type: String, default: "DE" },
   /** Full workbook sections - used to count how many rows reference a vocabulary entry */
   allSections: { type: Array, default: () => [] },
   /** Save workbook immediately (clears debounce); used before deleting an unused DB entry */
@@ -429,6 +431,10 @@ watch(
 
 <template>
   <div
+    data-dictionary-host
+    data-disable-dictionary
+    :data-tts-source-lang="props.sourceLang"
+    :data-tts-target-lang="props.targetLang"
     class="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
   >
     <div class="overflow-x-auto p-3">
@@ -451,6 +457,7 @@ watch(
             <td class="py-1.5 pr-2 align-top">
               <input
                 type="text"
+                data-tts-lang="sourceLang"
                 class="w-full rounded border border-zinc-200 bg-white px-2 py-1.5 text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
                 placeholder="Word"
                 :value="cache.get(entryId)?.word ?? ''"
@@ -462,6 +469,7 @@ watch(
             <td class="py-1.5 pr-2 align-top">
               <input
                 type="text"
+                data-tts-lang="targetLang"
                 class="w-full rounded border border-zinc-200 bg-white px-2 py-1.5 text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
                 placeholder="Meaning"
                 title="Updates the shared definition for this word everywhere it appears"
@@ -489,6 +497,7 @@ watch(
               <input
                 v-model="draft.word"
                 type="text"
+                data-tts-lang="sourceLang"
                 class="w-full rounded border border-zinc-200 bg-white px-2 py-1.5 text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
                 placeholder="Word"
                 autocomplete="off"
@@ -516,6 +525,7 @@ watch(
               <input
                 v-model="draft.meaning"
                 type="text"
+                data-tts-lang="targetLang"
                 class="w-full rounded border border-zinc-200 bg-white px-2 py-1.5 text-zinc-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
                 placeholder="Meaning"
                 :data-draft-meaning-for="draft.key"

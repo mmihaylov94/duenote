@@ -12,7 +12,7 @@ import TranslationSection from "./TranslationSection.vue";
 import HeaderSection from "./HeaderSection.vue";
 import VocabularySection from "./VocabularySection.vue";
 import SimpleTextSection from "./SimpleTextSection.vue";
-import SelectionDictionaryFloater from "./SelectionDictionaryFloater.vue";
+import SelectionActionsFloater from "./SelectionActionsFloater.vue";
 import VideoSection from "./VideoSection.vue";
 import DocumentSection from "./DocumentSection.vue";
 import { apiFetch } from "../api/client.js";
@@ -653,6 +653,13 @@ async function addSelectionToVocabulary(word, meaning) {
     class="w-full min-w-0 bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
   >
     <div
+      class="sr-only"
+      data-dictionary-host
+      :data-tts-source-lang="sourceLang"
+      :data-tts-target-lang="targetLang"
+      aria-hidden="true"
+    />
+    <div
       v-if="videoUrlModalOpen"
       class="fixed inset-0 z-103 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
@@ -910,6 +917,8 @@ async function addSelectionToVocabulary(word, meaning) {
                   v-else-if="sec.type === 'vocabulary' && courseId != null"
                   v-model="sections[idx]"
                   :course-id="courseId"
+                  :source-lang="sourceLang"
+                  :target-lang="targetLang"
                   :all-sections="sections"
                   :persist-workbook="flushPersist"
                   :on-vocabulary-changed="() => emit('vocabulary-changed')"
@@ -940,12 +949,12 @@ async function addSelectionToVocabulary(word, meaning) {
             </div>
           </div>
 
-          <SelectionDictionaryFloater
-            v-if="courseId != null"
+          <SelectionActionsFloater
             :course-id="courseId"
             :source-lang="sourceLang"
             :target-lang="targetLang"
             :add-entry="addSelectionToVocabulary"
+            :default-lang="sourceLang"
           />
 
           <div

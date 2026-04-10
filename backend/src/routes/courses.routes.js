@@ -4,6 +4,7 @@ import * as courseRepo from "../db/courses.repository.js";
 import * as coursePinsRepo from "../db/coursePins.repository.js";
 import * as vocabEntriesRepo from "../db/vocabularyEntries.repository.js";
 import * as materialsRepo from "../db/materials.repository.js";
+import * as materialOcrRepo from "../db/materialOcr.repository.js";
 import * as workbookRepo from "../db/workbooks.repository.js";
 import { normalizeLangOrDefault, normalizeLangRequired } from "../utils/languages.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
@@ -15,6 +16,7 @@ import {
   streamStoredMaterialToResponse,
   readStoredMaterialBuffer,
 } from "../services/materials.service.js";
+import { analyzeMaterialWithReadModel, parsePagesParam } from "../services/ocr.service.js";
 import { PDFDocument } from "pdf-lib";
 
 export const coursesRouter = Router();
@@ -321,6 +323,66 @@ coursesRouter.get(
       res,
     );
     if (!ok) return res.status(404).json({ error: "File missing" });
+  }),
+);
+
+coursesRouter.get(
+  "/:id/materials/:materialId/ocr",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const materialId = Number(req.params.materialId);
+    if (!Number.isFinite(id) || !Number.isFinite(materialId)) return res.status(400).json({ error: "Invalid id" });
+    const pages = parsePagesParam(typeof req.query.pages === "string" ? req.query.pages : "");
+    if (pages.length === 0) return res.status(400).json({ error: "Missing pages" });
+    const material = await materialsRepo.getMaterial(id, userId(req), materialId);
+    if (!material) return res.status(404).json({ error: "Not found" });
+    const cached = await materialOcrRepo.listOcrPages(material.id, pages);
+    res.json({
+      materialId: material.id,
+      pages: cached.map((p) => ({
+        pageNumber: p.pageNumber,
+        unit: p.unit,
+        width: p.width,
+        height: p.height,
+        ocr: p.ocr,
+      })),
+    });
+  }),
+);
+
+coursesRouter.post(
+  "/:id/materials/:materialId/ocr",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const materialId = Number(req.params.materialId);
+    if (!Number.isFinite(id) || !Number.isFinite(materialId)) return res.status(400).json({ error: "Invalid id" });
+    const pages = parsePagesParam((req.body || {}).pages);
+    if (pages.length === 0) return res.status(400).json({ error: "Missing pages" });
+    if (pages.length > 30) return res.status(400).json({ error: "Too many pages (max 30)" });
+    const material = await materialsRepo.getMaterial(id, userId(req), materialId);
+    if (!material) return res.status(404).json({ error: "Not found" });
+
+    const existing = await materialOcrRepo.listOcrPages(material.id, pages);
+    const have = new Set(existing.map((p) => p.pageNumber));
+    const missing = pages.filter((p) => !have.has(p));
+    if (missing.length === 0) {
+      return res.json({ ok: true, created: [], cached: pages });
+    }
+
+    const analyzedPages = await analyzeMaterialWithReadModel({ material, pages: missing });
+    const created = [];
+    for (const p of analyzedPages) {
+      const ins = await materialOcrRepo.insertOcrPage({
+        materialId: material.id,
+        pageNumber: p.pageNumber,
+        unit: p.unit,
+        width: p.width,
+        height: p.height,
+        ocr: { lines: p.lines, words: p.words },
+      });
+      if (ins) created.push(p.pageNumber);
+    }
+    res.json({ ok: true, created, cached: pages.filter((p) => !created.includes(p)) });
   }),
 );
 

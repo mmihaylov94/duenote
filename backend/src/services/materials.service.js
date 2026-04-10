@@ -118,7 +118,13 @@ export async function streamStoredMaterialToResponse({ storage, storageKey, mime
     );
     if (!out?.Body) return false;
     // Body is a readable stream in Node runtime.
-    await pipeline(out.Body, res);
+    try {
+      await pipeline(out.Body, res);
+    } catch (e) {
+      // Client aborted the connection mid-stream (navigation, rerender, etc).
+      if (e?.code === "ERR_STREAM_PREMATURE_CLOSE") return true;
+      throw e;
+    }
     return true;
   }
 
@@ -127,7 +133,12 @@ export async function streamStoredMaterialToResponse({ storage, storageKey, mime
   const stInfo = await stat(absPath).catch(() => null);
   if (!stInfo) return false;
   res.setHeader("Content-Length", String(stInfo.size));
-  await pipeline(createReadStream(absPath), res);
+  try {
+    await pipeline(createReadStream(absPath), res);
+  } catch (e) {
+    if (e?.code === "ERR_STREAM_PREMATURE_CLOSE") return true;
+    throw e;
+  }
   return true;
 }
 
