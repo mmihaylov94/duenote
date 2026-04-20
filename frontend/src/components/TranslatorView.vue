@@ -15,7 +15,14 @@ import SimpleTextSection from "./SimpleTextSection.vue";
 import SelectionActionsFloater from "./SelectionActionsFloater.vue";
 import VideoSection from "./VideoSection.vue";
 import DocumentSection from "./DocumentSection.vue";
+import DocumentPagesPreview from "./DocumentPagesPreview.vue";
 import { apiFetch } from "../api/client.js";
+
+function toPositiveIntOrNull(v) {
+  if (v == null) return null;
+  const n = Number(String(v).trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 const props = defineProps({
   workbookId: { type: Number, required: true },
@@ -728,7 +735,7 @@ async function addSelectionToVocabulary(word, meaning) {
       @click.self="closeDocumentModal"
     >
       <div
-        class="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
         @click.stop
       >
         <h2
@@ -738,69 +745,97 @@ async function addSelectionToVocabulary(word, meaning) {
         </h2>
         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
           Choose a PDF from course materials and optionally limit the page
-          range.
+          range. The preview updates as you type.
         </p>
 
-        <div class="mt-4">
-          <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
-            >PDF material</label
-          >
-          <select
-            v-model="pdfMaterialIdDraft"
-            class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-          >
-            <option value="">Select a PDF…</option>
-            <option v-for="m in pdfMaterials" :key="m.id" :value="String(m.id)">
-              {{ m.title || `PDF #${m.id}` }}
-            </option>
-          </select>
-          <p v-if="pdfPageCountLoading" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Reading pages…</p>
-          <p v-else-if="pdfPageCountError" class="mt-2 text-sm text-red-600 dark:text-red-400">
-            {{ pdfPageCountError }}
-          </p>
+        <div class="mt-4 min-h-0 flex-1 overflow-y-auto">
+          <div>
+            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              >PDF material</label
+            >
+            <select
+              v-model="pdfMaterialIdDraft"
+              class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+            >
+              <option value="">Select a PDF…</option>
+              <option
+                v-for="m in pdfMaterials"
+                :key="m.id"
+                :value="String(m.id)"
+              >
+                {{ m.title || `PDF #${m.id}` }}
+              </option>
+            </select>
+            <p
+              v-if="pdfPageCountLoading"
+              class="mt-2 text-sm text-zinc-500 dark:text-zinc-400"
+            >
+              Reading pages…
+            </p>
+            <p
+              v-else-if="pdfPageCountError"
+              class="mt-2 text-sm text-red-600 dark:text-red-400"
+            >
+              {{ pdfPageCountError }}
+            </p>
+            <p
+              v-if="!documentModalError && pdfMaterials.length === 0"
+              class="mt-2 text-sm text-zinc-500 dark:text-zinc-400"
+            >
+              No PDFs found in this course’s Materials yet.
+            </p>
+          </div>
+
+          <div class="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <label
+                class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                >Page from</label
+              >
+              <input
+                v-model="pdfPagesFromDraft"
+                type="text"
+                inputmode="numeric"
+                placeholder="1"
+                class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+                @keydown.enter.prevent="confirmDocument"
+              />
+            </div>
+            <div>
+              <label
+                class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                >Page to</label
+              >
+              <input
+                v-model="pdfPagesToDraft"
+                type="text"
+                inputmode="numeric"
+                :placeholder="pdfPageCount != null ? String(pdfPageCount) : ''"
+                class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+                @keydown.enter.prevent="confirmDocument"
+              />
+            </div>
+          </div>
+
+          <div class="mt-4" style="height: 340px">
+            <DocumentPagesPreview
+              class="h-full"
+              :course-id="props.courseId ?? null"
+              :material-id="
+                pdfMaterialIdDraft ? Number(pdfMaterialIdDraft) : null
+              "
+              :pages-from="toPositiveIntOrNull(pdfPagesFromDraft)"
+              :pages-to="toPositiveIntOrNull(pdfPagesToDraft)"
+            />
+          </div>
+
           <p
-            v-if="!documentModalError && pdfMaterials.length === 0"
-            class="mt-2 text-sm text-zinc-500 dark:text-zinc-400"
+            v-if="documentModalError"
+            class="mt-3 text-sm text-red-600 dark:text-red-400"
           >
-            No PDFs found in this course’s Materials yet.
+            {{ documentModalError }}
           </p>
         </div>
-
-        <div class="mt-4 grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
-              >Page from</label
-            >
-            <input
-              v-model="pdfPagesFromDraft"
-              type="text"
-              inputmode="numeric"
-              placeholder="1"
-              class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-              @keydown.enter.prevent="confirmDocument"
-            />
-          </div>
-          <div>
-            <label class="text-sm font-medium text-zinc-700 dark:text-zinc-300"
-              >Page to</label
-            >
-            <input
-              v-model="pdfPagesToDraft"
-              type="text"
-              inputmode="numeric"
-              :placeholder="pdfPageCount != null ? String(pdfPageCount) : ''"
-              class="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-              @keydown.enter.prevent="confirmDocument"
-            />
-          </div>
-        </div>
-
-        <p
-          v-if="documentModalError"
-          class="mt-3 text-sm text-red-600 dark:text-red-400"
-        >
-          {{ documentModalError }}
-        </p>
 
         <div class="mt-5 flex justify-end gap-2">
           <button

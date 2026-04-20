@@ -7,6 +7,8 @@ import {
   Pencil as LucidePencil,
   Highlighter as LucideHighlighter,
   Eraser as LucideEraser,
+  Check as LucideCheck,
+  X as LucideX,
 } from "lucide-vue-next";
 
 import * as pdfjsLib from "pdfjs-dist";
@@ -37,7 +39,7 @@ const editingNoteId = ref(null);
 const selectedDrawingId = ref(null);
 const annotateEnabled = ref(false);
 const highlightEnabled = ref(false);
-/** @type {import('vue').Ref<'off'|'pen'|'highlighter'|'eraser'>} */
+/** @type {import('vue').Ref<'off'|'pen'|'highlighter'|'eraser'|'check'|'cross'>} */
 const pencilTool = ref("off");
 const pencilColor = ref("#0a0a0a"); // default for new strokes
 const pencilSizePct = ref(0.35); // default for new strokes; percent of page width
@@ -73,6 +75,10 @@ function setPencilTool(next) {
   editingNoteId.value = null;
   if (next !== "off") {
     annotateEnabled.value = false;
+    if (highlightEnabled.value) {
+      highlightEnabled.value = false;
+      highlightSelection.value = null;
+    }
   }
 }
 
@@ -109,7 +115,13 @@ function applyPencilDefaultsFromSelected() {
   if (d.color === "light" || d.color === "black") pencilColor.value = d.color;
   if (Number.isFinite(Number(d.sizePct)))
     pencilSizePct.value = Number(d.sizePct);
-  if (d.tool === "pen" || d.tool === "highlighter") pencilTool.value = d.tool;
+  if (
+    d.tool === "pen" ||
+    d.tool === "highlighter" ||
+    d.tool === "check" ||
+    d.tool === "cross"
+  )
+    pencilTool.value = d.tool;
 }
 
 /** @type {Map<string, HTMLInputElement>} */
@@ -294,49 +306,119 @@ const spreadScrollerEl = ref(null);
 
 let scrollCooldownId = null;
 let lastScrollTop = 0;
-/** @returns {boolean} true if we moved to another page */
-function maybeFlipPageFromSingleScroll(direction) {
-  if (viewMode.value !== "single") return false;
-  if (scrollCooldownId != null) return false;
+// Accumulated wheel delta while pushing past an edge. A flip only happens once
+// the user pushes "beyond" the edge with enough intent, preventing accidental
+// page flips from trackpad momentum when focusing near the top/bottom of a page.
+const EDGE_FLIP_DELTA_THRESHOLD = 220;
+const EDGE_ACCUM_RESET_MS = 500;
+let edgeAccum = 0;
+let edgeAccumDir = 0;
+let edgeAccumAt = 0;
+/**
+ * What the scroller should do once the next rendered page's image has loaded.
+ * 'top' lands at the top of the new page, 'bottom' lands at the bottom.
+ * @type {null|'top'|'bottom'}
+ */
+let pendingScrollLanding = null;
+
+function resetEdgeAccum() {
+  edgeAccum = 0;
+  edgeAccumDir = 0;
+  edgeAccumAt = 0;
+}
+
+function scheduleLanding(landing) {
+  pendingScrollLanding = landing;
+  nextTick(() => applyPendingLanding());
+}
+
+function applyPendingLanding() {
+  if (pendingScrollLanding == null) return;
+  const el =
+    viewMode.value === "single"
+      ? singleScrollerEl.value
+      : spreadScrollerEl.value;
+  if (!el) return;
+  if (pendingScrollLanding === "top") {
+    el.scrollTop = 0;
+  } else if (pendingScrollLanding === "bottom") {
+    el.scrollTop = el.scrollHeight;
+  }
+  lastScrollTop = el.scrollTop;
+}
+
+function onPageImageLoad() {
+  // When a fresh page image finishes loading, the scroller's scrollHeight is
+  // finally correct. Re-apply the pending landing position so "back" lands at
+  // the bottom of the previous page instead of staying where it was.
+  if (pendingScrollLanding == null) return;
+  applyPendingLanding();
+  pendingScrollLanding = null;
+}
+
+/**
+ * Accumulate intent at an edge and flip the page only once the user has
+ * pushed beyond the edge with enough delta.
+ * @param {1|-1} direction
+ * @param {number} deltaAbs absolute wheel delta in pixels
+ * @param {'single'|'spread'} mode
+ * @returns {boolean} true if the wheel event should be consumed (preventDefault)
+ */
+function tryEdgeFlip(direction, deltaAbs, mode) {
+  if (scrollCooldownId != null) return true;
   const list = availablePages.value;
   if (!list.length) return false;
   const canPrev = activeIdx.value - stepSize.value >= 0;
   const canNext = activeIdx.value + stepSize.value <= list.length - 1;
-  const el = singleScrollerEl.value;
-  if (!el) return false;
-  const atTop = el.scrollTop <= 0;
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
-  if (direction > 0 && atBottom) {
-    if (!canNext) return false;
-    scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
+  if (direction > 0 && !canNext) return false;
+  if (direction < 0 && !canPrev) return false;
+
+  const now = performance.now();
+  if (edgeAccumDir !== direction || now - edgeAccumAt > EDGE_ACCUM_RESET_MS) {
+    edgeAccum = 0;
+    edgeAccumDir = direction;
+  }
+  edgeAccum += deltaAbs;
+  edgeAccumAt = now;
+
+  if (edgeAccum < EDGE_FLIP_DELTA_THRESHOLD) {
+    // Consume the event so the browser doesn't bounce/rubber-band while the
+    // user is deciding whether to advance past the edge.
+    return true;
+  }
+
+  resetEdgeAccum();
+  scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 350);
+
+  if (direction > 0) {
+    scheduleLanding("top");
     goNext();
-    nextTick(() => {
-      const s = singleScrollerEl.value;
-      if (s) s.scrollTop = 0;
-    });
-    return true;
-  }
-  if (direction < 0 && atTop) {
-    if (!canPrev) return false;
-    scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
+  } else {
+    scheduleLanding("bottom");
     goPrev();
-    nextTick(() => {
-      const s = singleScrollerEl.value;
-      if (s) s.scrollTop = 0;
-    });
-    return true;
   }
-  return false;
+  // Re-apply after images render (handled by onPageImageLoad); belt-and-suspenders.
+  nextTick(() => {
+    const s =
+      mode === "single" ? singleScrollerEl.value : spreadScrollerEl.value;
+    if (!s) return;
+    if (direction > 0) s.scrollTop = 0;
+    else s.scrollTop = s.scrollHeight;
+  });
+  return true;
 }
 
 function onSingleScroll() {
   if (viewMode.value !== "single") return;
   const el = singleScrollerEl.value;
   if (!el) return;
-  const dir =
-    el.scrollTop > lastScrollTop ? 1 : el.scrollTop < lastScrollTop ? -1 : 0;
   lastScrollTop = el.scrollTop;
-  if (dir) maybeFlipPageFromSingleScroll(dir);
+  // If the user scrolls away from an edge, forget any accumulated edge intent.
+  const atTop = el.scrollTop <= 0;
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+  if ((edgeAccumDir > 0 && !atBottom) || (edgeAccumDir < 0 && !atTop)) {
+    resetEdgeAccum();
+  }
 }
 
 function onSingleWheel(e) {
@@ -345,43 +427,15 @@ function onSingleWheel(e) {
   if (!el) return;
   const atTop = el.scrollTop <= 0;
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
-  if ((e.deltaY > 0 && atBottom) || (e.deltaY < 0 && atTop)) {
-    const flipped = maybeFlipPageFromSingleScroll(e.deltaY > 0 ? 1 : -1);
-    if (flipped) e.preventDefault();
+  const dir = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+  if (!dir) return;
+  const atEdgeForDir = (dir > 0 && atBottom) || (dir < 0 && atTop);
+  if (!atEdgeForDir) {
+    resetEdgeAccum();
+    return;
   }
-}
-
-function maybeFlipPageFromSpreadScroll(direction) {
-  if (viewMode.value !== "spread") return;
-  if (scrollCooldownId != null) return;
-  const list = availablePages.value;
-  if (!list.length) return;
-  const canPrev = activeIdx.value - stepSize.value >= 0;
-  const canNext = activeIdx.value + stepSize.value <= list.length - 1;
-  const el = spreadScrollerEl.value;
-  if (!el) return;
-  const atTop = el.scrollTop <= 0;
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
-  if (direction > 0 && atBottom) {
-    if (!canNext) return false;
-    scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
-    goNext();
-    nextTick(() => {
-      const s = spreadScrollerEl.value;
-      if (s) s.scrollTop = 0;
-    });
-    return true;
-  } else if (direction < 0 && atTop) {
-    if (!canPrev) return false;
-    scrollCooldownId = window.setTimeout(() => (scrollCooldownId = null), 200);
-    goPrev();
-    nextTick(() => {
-      const s = spreadScrollerEl.value;
-      if (s) s.scrollTop = s.scrollHeight;
-    });
-    return true;
-  }
-  return false;
+  const consumed = tryEdgeFlip(dir, Math.abs(e.deltaY), "single");
+  if (consumed) e.preventDefault();
 }
 
 function onSpreadWheel(e) {
@@ -390,10 +444,15 @@ function onSpreadWheel(e) {
   if (!el) return;
   const atTop = el.scrollTop <= 0;
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
-  if ((e.deltaY > 0 && atBottom) || (e.deltaY < 0 && atTop)) {
-    const didFlip = maybeFlipPageFromSpreadScroll(e.deltaY > 0 ? 1 : -1);
-    if (didFlip) e.preventDefault();
+  const dir = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+  if (!dir) return;
+  const atEdgeForDir = (dir > 0 && atBottom) || (dir < 0 && atTop);
+  if (!atEdgeForDir) {
+    resetEdgeAccum();
+    return;
   }
+  const consumed = tryEdgeFlip(dir, Math.abs(e.deltaY), "spread");
+  if (consumed) e.preventDefault();
 }
 
 function ensureNotesArray() {
@@ -466,10 +525,14 @@ function drawingStyle(d) {
           ? colorRaw
           : "rgb(9 9 11)";
   const opacity = d?.tool === "highlighter" ? 0.35 : 1;
+  // Stamps (check/cross) look cleaner with a thinner stroke relative to their size.
+  const isStamp = d?.tool === "check" || d?.tool === "cross";
+  const effectiveSizePct = isStamp ? sizePct * 0.5 : sizePct;
+  const minStroke = isStamp ? "0.75px" : "1px";
   return {
     stroke: color,
     opacity,
-    strokeWidth: `clamp(1px, calc(var(--page-w, 700px) * ${sizePct / 100}), 24px)`,
+    strokeWidth: `clamp(${minStroke}, calc(var(--page-w, 700px) * ${effectiveSizePct / 100}), 24px)`,
   };
 }
 
@@ -627,12 +690,46 @@ function onGlobalPointerDownForColorPicker(e) {
   closeColorPicker();
 }
 
+function stampHalfSize(d) {
+  const sizePct = Number.isFinite(Number(d?.sizePct))
+    ? Number(d.sizePct)
+    : 0.35;
+  // Normalized (0-1 of page) half-size. Tuned so the default sizePct (0.35) yields
+  // roughly a 5px half-size (~10px total stamp) on a ~700px-wide page, and scales
+  // up/down when the user adjusts pencil thickness.
+  return Math.max(0.003, Math.min(0.03, sizePct * 0.02));
+}
+
 function drawingPathD(d) {
   const pts = Array.isArray(d?.points) ? d.points : [];
   if (!pts.length) return "";
   const ox = Number.isFinite(Number(d?.x)) ? Number(d.x) : 0;
   const oy = Number.isFinite(Number(d?.y)) ? Number(d.y) : 0;
   const scale = 1000;
+
+  if (d?.tool === "check" || d?.tool === "cross") {
+    const p0 = pts[0];
+    const cx = clamp01(p0.x + ox, 0) * scale;
+    const cy = clamp01(p0.y + oy, 0) * scale;
+    const h = stampHalfSize(d) * scale;
+    if (d.tool === "check") {
+      const x1 = cx - h * 0.75;
+      const y1 = cy + h * 0.05;
+      const x2 = cx - h * 0.2;
+      const y2 = cy + h * 0.55;
+      const x3 = cx + h * 0.8;
+      const y3 = cy - h * 0.6;
+      return `M ${x1.toFixed(2)} ${y1.toFixed(2)} L ${x2.toFixed(2)} ${y2.toFixed(2)} L ${x3.toFixed(2)} ${y3.toFixed(2)}`;
+    }
+    const a = h * 0.72;
+    return (
+      `M ${(cx - a).toFixed(2)} ${(cy - a).toFixed(2)} ` +
+      `L ${(cx + a).toFixed(2)} ${(cy + a).toFixed(2)} ` +
+      `M ${(cx + a).toFixed(2)} ${(cy - a).toFixed(2)} ` +
+      `L ${(cx - a).toFixed(2)} ${(cy + a).toFixed(2)}`
+    );
+  }
+
   const p0 = pts[0];
   let out = `M ${(clamp01(p0.x + ox, 0) * scale).toFixed(2)} ${(clamp01(p0.y + oy, 0) * scale).toFixed(2)}`;
   for (let i = 1; i < pts.length; i += 1) {
@@ -684,15 +781,39 @@ function beginStroke(pageNumber, tool, e) {
   ensureDrawingsArray();
   const p = pagePointFromEvent(pageNumber, e, true);
   if (!p) return;
+
+  const baseSizePct = Number.isFinite(Number(pencilSizePct.value))
+    ? Number(pencilSizePct.value)
+    : 0.35;
+
+  // Stamps (check/cross) are single-click placements — no drag stroke.
+  if (tool === "check" || tool === "cross") {
+    const id = crypto.randomUUID();
+    const stamp = {
+      id,
+      page: pageNumber,
+      tool,
+      color: String(pencilColor.value || "#0a0a0a"),
+      sizePct: baseSizePct,
+      x: 0,
+      y: 0,
+      points: [{ x: p.x, y: p.y }],
+    };
+    section.value.drawings.push(stamp);
+    selectedNoteId.value = null;
+    editingNoteId.value = null;
+    // Don't auto-select stamps so rapid stamping keeps using the pencil color.
+    selectedDrawingId.value = null;
+    e.preventDefault();
+    return;
+  }
+
   try {
     e.currentTarget?.setPointerCapture?.(e.pointerId);
   } catch {
     /* ignore */
   }
   const id = crypto.randomUUID();
-  const baseSizePct = Number.isFinite(Number(pencilSizePct.value))
-    ? Number(pencilSizePct.value)
-    : 0.35;
   const stroke = {
     id,
     page: pageNumber,
@@ -1654,6 +1775,34 @@ onUnmounted(async () => {
           >
             <LucideEraser class="h-4 w-4" aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            :class="
+              pencilTool === 'check'
+                ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                : ''
+            "
+            title="Checkmark stamp"
+            aria-label="Checkmark stamp"
+            @click="setPencilTool('check')"
+          >
+            <LucideCheck class="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            :class="
+              pencilTool === 'cross'
+                ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                : ''
+            "
+            title="Cross stamp"
+            aria-label="Cross stamp"
+            @click="setPencilTool('cross')"
+          >
+            <LucideX class="h-4 w-4" aria-hidden="true" />
+          </button>
           <div class="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-700" />
           <button
             type="button"
@@ -1830,6 +1979,7 @@ onUnmounted(async () => {
             alt=""
             class="block w-full select-none"
             draggable="false"
+            @load="onPageImageLoad"
           />
 
           <!-- OCR overlay -->
@@ -1870,16 +2020,22 @@ onUnmounted(async () => {
           </div>
 
           <svg
-            class="absolute inset-0"
+            class="absolute inset-0 h-full w-full"
             viewBox="0 0 1000 1000"
             preserveAspectRatio="none"
             :style="{
               pointerEvents:
                 annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none',
+              touchAction: pencilTool !== 'off' ? 'none' : 'auto',
             }"
             @pointerdown.stop.prevent="
               (e) => {
-                if (pencilTool === 'pen' || pencilTool === 'highlighter')
+                if (
+                  pencilTool === 'pen' ||
+                  pencilTool === 'highlighter' ||
+                  pencilTool === 'check' ||
+                  pencilTool === 'cross'
+                )
                   beginStroke(p.page, pencilTool, e);
                 else if (pencilTool === 'eraser') beginErase(p.page, e);
               }
@@ -2043,6 +2199,7 @@ onUnmounted(async () => {
               alt=""
               class="block w-full select-none"
               draggable="false"
+              @load="onPageImageLoad"
             />
 
             <!-- OCR overlay -->
@@ -2083,16 +2240,22 @@ onUnmounted(async () => {
             </div>
 
             <svg
-              class="absolute inset-0"
+              class="absolute inset-0 h-full w-full"
               viewBox="0 0 1000 1000"
               preserveAspectRatio="none"
               :style="{
                 pointerEvents:
                   annotateEnabled || pencilTool !== 'off' ? 'auto' : 'none',
+                touchAction: pencilTool !== 'off' ? 'none' : 'auto',
               }"
               @pointerdown.stop.prevent="
                 (e) => {
-                  if (pencilTool === 'pen' || pencilTool === 'highlighter')
+                  if (
+                    pencilTool === 'pen' ||
+                    pencilTool === 'highlighter' ||
+                    pencilTool === 'check' ||
+                    pencilTool === 'cross'
+                  )
                     beginStroke(p.page, pencilTool, e);
                   else if (pencilTool === 'eraser') beginErase(p.page, e);
                 }
